@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FSR 1.0 Shader Test - WebGL2 &amp; WebGPU</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; }
+
+.header { padding: 12px 20px; background: #16213e; border-bottom: 1px solid #0f3460; display: flex; align-items: center; gap: 16px; }
+.header h1 { font-size: 16px; font-weight: 600; }
+.header .status { font-size: 12px; color: #888; }
+
+.main { display: flex; height: calc(100vh - 45px); }
+
+.controls { width: 280px; padding: 16px; background: #16213e; overflow-y: auto; flex-shrink: 0; border-right: 1px solid #0f3460; }
+.controls h3 { font-size: 13px; color: #999; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.controls h3:first-child { margin-top: 0; }
+
+.control-row { margin-bottom: 10px; }
+.control-row label { display: block; font-size: 12px; margin-bottom: 4px; color: #bbb; }
+.control-row select, .control-row input[type="file"] { width: 100%; padding: 6px 8px; background: #1a1a2e; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; font-size: 13px; }
+.control-row input[type="range"] { width: 100%; }
+.control-row .value { float: right; font-size: 11px; color: #888; }
+
+.display { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.display-header { display: flex; gap: 0; background: #16213e; border-bottom: 1px solid #0f3460; }
+.tab { padding: 8px 20px; font-size: 13px; cursor: pointer; border: none; background: transparent; color: #888; border-bottom: 2px solid transparent; }
+.tab.active { color: #e0e0e0; border-bottom-color: #e94560; }
+.tab:hover { color: #ccc; }
+
+.canvas-area { flex: 1; display: flex; align-items: center; justify-content: center; background: #111; position: relative; overflow: hidden; }
+.canvas-area video, .canvas-area canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+.canvas-area .label { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); padding: 4px 8px; font-size: 11px; border-radius: 3px; }
+.canvas-area .resolution { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.7); padding: 4px 8px; font-size: 11px; border-radius: 3px; }
+.canvas-area .fps { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7); padding: 4px 8px; font-size: 11px; border-radius: 3px; }
+
+.split-view { flex: 1; display: flex; overflow: hidden; }
+.split-view .pane { flex: 1; display: flex; align-items: center; justify-content: center; background: #111; position: relative; }
+.split-view .pane + .pane { border-left: 2px solid #333; }
+
+.error-msg { color: #e94560; background: rgba(233,69,96,0.1); padding: 12px; margin: 8px; border-radius: 4px; font-size: 13px; }
+
+button.primary { padding: 8px 16px; background: #e94560; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; width: 100%; }
+button.primary:hover { background: #c73e54; }
+button.primary:disabled { background: #555; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>FSR 1.0 Shader Test</h1>
+    <span class="status" id="statusText">Load a video to begin</span>
+</div>
+
+<div class="main">
+    <div class="controls">
+        <h3>Input</h3>
+        <div class="control-row">
+            <label>Video File</label>
+            <input type="file" id="videoFile" accept="video/*">
+        </div>
+        <div class="control-row">
+            <button class="primary" id="btnTestPattern">Use Test Pattern (720p)</button>
+        </div>
+
+        <h3>Renderer</h3>
+        <div class="control-row">
+            <label>Backend</label>
+            <select id="renderer">
+                <option value="webgl2">WebGL2</option>
+                <option value="webgpu">WebGPU</option>
+            </select>
+        </div>
+
+        <h3>FSR Settings</h3>
+        <div class="control-row">
+            <label>Upscale Ratio</label>
+            <select id="ratio">
+                <option value="1">1x (no upscale)</option>
+                <option value="1.5">1.5x</option>
+                <option value="2" selected>2x</option>
+                <option value="3">3x</option>
+            </select>
+        </div>
+        <div class="control-row">
+            <label>Sharpness (RCAS) <span class="value" id="sharpnessVal">0.5</span></label>
+            <input type="range" id="sharpness" min="0" max="2" step="0.1" value="0.5">
+        </div>
+        <div class="control-row">
+            <label>Brightness <span class="value" id="brightnessVal">1.0</span></label>
+            <input type="range" id="brightness" min="0.5" max="2" step="0.05" value="1.0">
+        </div>
+        <div class="control-row">
+            <label>Contrast <span class="value" id="contrastVal">1.0</span></label>
+            <input type="range" id="contrast" min="0.5" max="2" step="0.05" value="1.0">
+        </div>
+        <div class="control-row">
+            <label>Saturation <span class="value" id="saturationVal">1.0</span></label>
+            <input type="range" id="saturation" min="0" max="2" step="0.05" value="1.0">
+        </div>
+
+        <h3>View</h3>
+        <div class="control-row">
+            <label>Display Mode</label>
+            <select id="viewMode">
+                <option value="fsr">FSR Output Only</option>
+                <option value="split" selected>Split (Original | FSR)</option>
+                <option value="easu">EASU Only (no RCAS)</option>
+            </select>
+        </div>
+
+        <h3>Actions</h3>
+        <div class="control-row">
+            <button class="primary" id="btnStart" disabled>Start Rendering</button>
+        </div>
+    </div>
+
+    <div class="display">
+        <div class="display-header">
+            <button class="tab active" data-tab="render">Render Output</button>
+            <button class="tab" data-tab="log">Console Log</button>
+        </div>
+        <div id="renderView" class="split-view">
+            <div class="pane" id="originalPane" style="display:none;">
+                <video id="video" loop muted playsinline></video>
+                <div class="label">Original</div>
+                <div class="resolution" id="origRes">-</div>
+            </div>
+            <div class="pane" id="fsrPane">
+                <div class="label" id="fsrLabel">FSR Output</div>
+                <div class="resolution" id="fsrRes">-</div>
+                <div class="fps" id="fpsCounter">- FPS</div>
+            </div>
+        </div>
+        <div id="logView" style="display:none; flex:1; overflow-y:auto; padding:12px; background:#111; font-family:monospace; font-size:12px; white-space:pre-wrap;"></div>
+    </div>
+</div>
+
+<script>
+// ===== Shader Sources =====
+
+const VERT_GLSL = `#version 300 es
+in vec4 position;
+void main() { gl_Position = position; }
+`;
+
+const EASU_FRAG_GLSL = `#version 300 es
+precision mediump float;
+uniform vec2 iResolution;
+uniform sampler2D iChannel0;
+out vec4 fragColor;
+
+vec3 FsrEasuCF(vec2 p) { return texture(iChannel0, p).rgb; }
+
+void FsrEasuCon(out vec4 con0, out vec4 con1, out vec4 con2, out vec4 con3,
+    vec2 inputViewportInPixels, vec2 inputSizeInPixels, vec2 outputSizeInPixels) {
+    con0 = vec4(
+        inputViewportInPixels.x / outputSizeInPixels.x,
+        inputViewportInPixels.y / outputSizeInPixels.y,
+        .5 * inputViewportInPixels.x / outputSizeInPixels.x - .5,
+        .5 * inputViewportInPixels.y / outputSizeInPixels.y - .5);
+    con1 = vec4(1, 1, 1, -1) / inputSizeInPixels.xyxy;
+    con2 = vec4(-1, 2, 1, 2) / inputSizeInPixels.xyxy;
+    con3 = vec4(0, 4, 0, 0) / inputSizeInPixels.xyxy;
+}
+
+void FsrEasuTapF(inout vec3 aC, inout float aW, vec2 off, vec2 dir, vec2 len, float lob, float clp, vec3 c) {
+    vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len;
+    float d2 = min(dot(v, v), clp);
+    float wB = .4 * d2 - 1.;
+    float wA = lob * d2 - 1.;
+    wB *= wB; wA *= wA;
+    wB = 1.5625 * wB - .5625;
+    float w = wB * wA;
+    aC += c * w; aW += w;
+}
+
+void FsrEasuSetF(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE) {
+    float lenX = max(abs(lD - lC), abs(lC - lB));
+    float dirX = lD - lB;
+    dir.x += dirX * w;
+    lenX = clamp(abs(dirX) / lenX, 0., 1.); lenX *= lenX;
+    len += lenX * w;
+    float lenY = max(abs(lE - lC), abs(lC - lA));
+    float dirY = lE - lA;
+    dir.y += dirY * w;
+    lenY = clamp(abs(dirY) / lenY, 0., 1.); lenY *= lenY;
+    len += lenY * w;
+}
+
+void FsrEasuF(out vec3 pix, vec2 ip, vec4 con0, vec4 con1, vec4 con2, vec4 con3) {
+    vec2 pp = ip * con0.xy + con0.zw;
+    vec2 fp = floor(pp); pp -= fp;
+    vec2 p0 = fp * con1.xy + con1.zw;
+    vec2 p1 = p0 + con2.xy;
+    vec2 p2 = p0 + con2.zw;
+    vec2 p3 = p0 + con3.xy;
+    vec4 off = vec4(-.5, .5, -.5, .5) * con1.xxyy;
+
+    vec3 bC = FsrEasuCF(p0 + off.xw); float bL = bC.g + 0.5 * (bC.r + bC.b);
+    vec3 cC = FsrEasuCF(p0 + off.yw); float cL = cC.g + 0.5 * (cC.r + cC.b);
+    vec3 iC = FsrEasuCF(p1 + off.xw); float iL = iC.g + 0.5 * (iC.r + iC.b);
+    vec3 jC = FsrEasuCF(p1 + off.yw); float jL = jC.g + 0.5 * (jC.r + jC.b);
+    vec3 fC = FsrEasuCF(p1 + off.yz); float fL = fC.g + 0.5 * (fC.r + fC.b);
+    vec3 eC = FsrEasuCF(p1 + off.xz); float eL = eC.g + 0.5 * (eC.r + eC.b);
+    vec3 kC = FsrEasuCF(p2 + off.xw); float kL = kC.g + 0.5 * (kC.r + kC.b);
+    vec3 lC = FsrEasuCF(p2 + off.yw); float lL = lC.g + 0.5 * (lC.r + lC.b);
+    vec3 hC = FsrEasuCF(p2 + off.yz); float hL = hC.g + 0.5 * (hC.r + hC.b);
+    vec3 gC = FsrEasuCF(p2 + off.xz); float gL = gC.g + 0.5 * (gC.r + gC.b);
+    vec3 oC = FsrEasuCF(p3 + off.yz); float oL = oC.g + 0.5 * (oC.r + oC.b);
+    vec3 nC = FsrEasuCF(p3 + off.xz); float nL = nC.g + 0.5 * (nC.r + nC.b);
+
+    vec2 dir = vec2(0); float len = 0.;
+    FsrEasuSetF(dir, len, (1. - pp.x) * (1. - pp.y), bL, eL, fL, gL, jL);
+    FsrEasuSetF(dir, len, pp.x * (1. - pp.y), cL, fL, gL, hL, kL);
+    FsrEasuSetF(dir, len, (1. - pp.x) * pp.y, fL, iL, jL, kL, nL);
+    FsrEasuSetF(dir, len, pp.x * pp.y, gL, jL, kL, lL, oL);
+
+    vec2 dir2 = dir * dir;
+    float dirR = dir2.x + dir2.y;
+    bool zro = dirR < (1.0 / 32768.0);
+    dirR = inversesqrt(dirR);
+    dirR = zro ? 1.0 : dirR;
+    dir.x = zro ? 1.0 : dir.x;
+    dir *= vec2(dirR);
+    len = len * 0.5; len *= len;
+    float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));
+    vec2 len2 = vec2(1. + (stretch - 1.0) * len, 1. - .5 * len);
+    float lob = .5 - .29 * len;
+    float clp = 1. / lob;
+
+    vec3 min4 = min(min(fC, gC), min(jC, kC));
+    vec3 max4 = max(max(fC, gC), max(jC, kC));
+    vec3 aC = vec3(0); float aW = 0.;
+    FsrEasuTapF(aC, aW, vec2(0,-1)-pp, dir, len2, lob, clp, bC);
+    FsrEasuTapF(aC, aW, vec2(1,-1)-pp, dir, len2, lob, clp, cC);
+    FsrEasuTapF(aC, aW, vec2(-1,1)-pp, dir, len2, lob, clp, iC);
+    FsrEasuTapF(aC, aW, vec2(0,1)-pp, dir, len2, lob, clp, jC);
+    FsrEasuTapF(aC, aW, vec2(0,0)-pp, dir, len2, lob, clp, fC);
+    FsrEasuTapF(aC, aW, vec2(-1,0)-pp, dir, len2, lob, clp, eC);
+    FsrEasuTapF(aC, aW, vec2(1,1)-pp, dir, len2, lob, clp, kC);
+    FsrEasuTapF(aC, aW, vec2(2,1)-pp, dir, len2, lob, clp, lC);
+    FsrEasuTapF(aC, aW, vec2(2,0)-pp, dir, len2, lob, clp, hC);
+    FsrEasuTapF(aC, aW, vec2(1,0)-pp, dir, len2, lob, clp, gC);
+    FsrEasuTapF(aC, aW, vec2(1,2)-pp, dir, len2, lob, clp, oC);
+    FsrEasuTapF(aC, aW, vec2(0,2)-pp, dir, len2, lob, clp, nC);
+    pix = min(max4, max(min4, aC / aW));
+}
+
+void main() {
+    vec4 fragCoord = gl_FragCoord;
+    vec3 c; vec4 con0, con1, con2, con3;
+    vec2 rendersize = vec2(textureSize(iChannel0, 0));
+    FsrEasuCon(con0, con1, con2, con3, rendersize, rendersize, iResolution);
+    FsrEasuF(c, fragCoord.xy, con0, con1, con2, con3);
+    fragColor = vec4(c.xyz, 1);
+}
+`;
+
+const RCAS_FRAG_GLSL = `#version 300 es
+precision mediump float;
+uniform vec2 iResolution;
+uniform float sharpness;
+uniform sampler2D iChannel0;
+uniform float brightness;
+uniform float contrast;
+uniform float saturation;
+out vec4 fragColor;
+
+const vec3 LUMINOSITY_FACTOR = vec3(0.299, 0.587, 0.114);
+#define FSR_RCAS_LIMIT (0.25 - (1.0 / 16.0))
+
+void FsrRcasCon(out float con, float sharpness) { con = exp2(-sharpness); }
+
+vec4 FsrRcasLoadF(vec2 p) { return texture(iChannel0, p / iResolution.xy); }
+
+vec3 FsrRcasF(vec2 ip, float con) {
+    vec2 sp = vec2(ip);
+    vec3 b = FsrRcasLoadF(sp + vec2(0,-1)).rgb;
+    vec3 d = FsrRcasLoadF(sp + vec2(-1,0)).rgb;
+    vec3 e = FsrRcasLoadF(sp).rgb;
+    vec3 f = FsrRcasLoadF(sp + vec2(1,0)).rgb;
+    vec3 h = FsrRcasLoadF(sp + vec2(0,1)).rgb;
+
+    float bL = b.g + .5*(b.b+b.r);
+    float dL = d.g + .5*(d.b+d.r);
+    float eL = e.g + .5*(e.b+e.r);
+    float fL = f.g + .5*(f.b+f.r);
+    float hL = h.g + .5*(h.b+h.r);
+
+    float nz = .25*(bL+dL+fL+hL)-eL;
+    nz = clamp(abs(nz)/(max(max(bL,dL),max(eL,max(fL,hL)))-min(min(bL,dL),min(eL,min(fL,hL)))),0.,1.);
+    nz = 1.-.5*nz;
+
+    vec3 mn4 = min(b, min(f, h));
+    vec3 mx4 = max(b, max(f, h));
+    vec2 peakC = vec2(1.,-4.);
+    vec3 hitMin = mn4 / (4.*mx4);
+    vec3 hitMax = (peakC.x-mx4) / (4.*mn4+peakC.y);
+    vec3 lobeRGB = max(-hitMin, hitMax);
+    float lobe = max(-FSR_RCAS_LIMIT, min(max(lobeRGB.r,max(lobeRGB.g,lobeRGB.b)),0.))*con;
+    lobe *= nz;
+    return (lobe*(b+d+h+f)+e)/(4.*lobe+1.);
+}
+
+void main() {
+    float con; FsrRcasCon(con, sharpness);
+    vec3 color = FsrRcasF(gl_FragCoord.xy, con);
+    color = mix(vec3(dot(color, LUMINOSITY_FACTOR)), color, saturation);
+    color = contrast * (color - 0.5) + 0.5;
+    color = brightness * color;
+    fragColor = vec4(color, 1);
+}
+`;
+
+// ===== WebGPU WGSL Shaders =====
+const EASU_WGSL = `
+struct EasuParams { resolution: vec2<f32> };
+struct VertexOutput { @builtin(position) position: vec4<f32> };
+
+@group(0) @binding(0) var ourSampler: sampler;
+@group(0) @binding(1) var ourTexture: texture_external;
+@group(0) @binding(2) var<uniform> params: EasuParams;
+
+@vertex fn vsMain(@location(0) pos: vec2<f32>) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4<f32>(pos, 0.0, 1.0);
+    return out;
+}
+
+fn FsrEasuCF(p: vec2<f32>) -> vec3<f32> {
+    return textureSampleBaseClampToEdge(ourTexture, ourSampler, p).rgb;
+}
+
+fn FsrEasuCon(inputViewportInPixels: vec2<f32>, inputSizeInPixels: vec2<f32>, outputSizeInPixels: vec2<f32>) -> array<vec4<f32>, 4> {
+    let con0 = vec4<f32>(
+        inputViewportInPixels.x / outputSizeInPixels.x,
+        inputViewportInPixels.y / outputSizeInPixels.y,
+        0.5 * inputViewportInPixels.x / outputSizeInPixels.x - 0.5,
+        0.5 * inputViewportInPixels.y / outputSizeInPixels.y - 0.5);
+    let con1 = vec4<f32>(1.0, 1.0, 1.0, -1.0) / inputSizeInPixels.xyxy;
+    let con2 = vec4<f32>(-1.0, 2.0, 1.0, 2.0) / inputSizeInPixels.xyxy;
+    let con3 = vec4<f32>(0.0, 4.0, 0.0, 0.0) / inputSizeInPixels.xyxy;
+    return array<vec4<f32>, 4>(con0, con1, con2, con3);
+}
+
+fn FsrEasuTapF(aC: ptr<function, vec3<f32>>, aW: ptr<function, f32>, off: vec2<f32>, dir: vec2<f32>, len: vec2<f32>, lob: f32, clp: f32, c: vec3<f32>) {
+    let v = vec2<f32>(dot(off, dir), dot(off, vec2<f32>(-dir.y, dir.x))) * len;
+    let d2 = min(dot(v, v), clp);
+    var wB = 0.4 * d2 - 1.0; var wA = lob * d2 - 1.0;
+    wB = wB * wB; wA = wA * wA;
+    wB = 1.5625 * wB - 0.5625;
+    let w = wB * wA;
+    *aC += c * w; *aW += w;
+}
+
+fn FsrEasuSetF(dir: ptr<function, vec2<f32>>, lenAccum: ptr<function, f32>, w: f32, lA: f32, lB: f32, lC: f32, lD: f32, lE: f32) {
+    let lenX = max(abs(lD - lC), abs(lC - lB));
+    let dirX = lD - lB;
+    (*dir).x += dirX * w;
+    var lenXn = clamp(abs(dirX) / lenX, 0.0, 1.0); lenXn = lenXn * lenXn;
+    *lenAccum += lenXn * w;
+    let lenY = max(abs(lE - lC), abs(lC - lA));
+    let dirY = lE - lA;
+    (*dir).y += dirY * w;
+    var lenYn = clamp(abs(dirY) / lenY, 0.0, 1.0); lenYn = lenYn * lenYn;
+    *lenAccum += lenYn * w;
+}
+
+fn FsrEasuF(ip: vec2<f32>, con0: vec4<f32>, con1: vec4<f32>, con2: vec4<f32>, con3: vec4<f32>) -> vec3<f32> {
+    var pp = ip * con0.xy + con0.zw;
+    let fp = floor(pp); pp -= fp;
+    let p0 = fp * con1.xy + con1.zw;
+    let p1 = p0 + con2.xy; let p2 = p0 + con2.zw; let p3 = p0 + con3.xy;
+    let off = vec4<f32>(-0.5, 0.5, -0.5, 0.5) * con1.xxyy;
+
+    let bC = FsrEasuCF(p0 + off.xw); let bL = bC.g + 0.5 * (bC.r + bC.b);
+    let cC = FsrEasuCF(p0 + off.yw); let cL = cC.g + 0.5 * (cC.r + cC.b);
+    let iC_s = FsrEasuCF(p1 + off.xw); let iL = iC_s.g + 0.5 * (iC_s.r + iC_s.b);
+    let jC = FsrEasuCF(p1 + off.yw); let jL = jC.g + 0.5 * (jC.r + jC.b);
+    let fC = FsrEasuCF(p1 + off.yz); let fL = fC.g + 0.5 * (fC.r + fC.b);
+    let eC = FsrEasuCF(p1 + off.xz); let eL = eC.g + 0.5 * (eC.r + eC.b);
+    let kC = FsrEasuCF(p2 + off.xw); let kL = kC.g + 0.5 * (kC.r + kC.b);
+    let lC_s = FsrEasuCF(p2 + off.yw); let lL = lC_s.g + 0.5 * (lC_s.r + lC_s.b);
+    let hC = FsrEasuCF(p2 + off.yz); let hL = hC.g + 0.5 * (hC.r + hC.b);
+    let gC = FsrEasuCF(p2 + off.xz); let gL = gC.g + 0.5 * (gC.r + gC.b);
+    let oC = FsrEasuCF(p3 + off.yz); let oL = oC.g + 0.5 * (oC.r + oC.b);
+    let nC = FsrEasuCF(p3 + off.xz); let nL = nC.g + 0.5 * (nC.r + nC.b);
+
+    var dir = vec2<f32>(0.0); var lenAccum = 0.0;
+    FsrEasuSetF(&dir, &lenAccum, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);
+    FsrEasuSetF(&dir, &lenAccum, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);
+    FsrEasuSetF(&dir, &lenAccum, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);
+    FsrEasuSetF(&dir, &lenAccum, pp.x * pp.y, gL, jL, kL, lL, oL);
+
+    let dir2 = dir * dir; let dirR_raw = dir2.x + dir2.y;
+    let zro = dirR_raw < (1.0 / 32768.0);
+    var dirR = inverseSqrt(dirR_raw);
+    dirR = select(dirR, 1.0, zro);
+    dir.x = select(dir.x, 1.0, zro);
+    dir *= vec2<f32>(dirR);
+    lenAccum = lenAccum * 0.5; lenAccum = lenAccum * lenAccum;
+    let stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));
+    let len2 = vec2<f32>(1.0 + (stretch - 1.0) * lenAccum, 1.0 - 0.5 * lenAccum);
+    let lob = 0.5 - 0.29 * lenAccum; let clp = 1.0 / lob;
+
+    let min4 = min(min(fC, gC), min(jC, kC));
+    let max4 = max(max(fC, gC), max(jC, kC));
+    var aC = vec3<f32>(0.0); var aW = 0.0;
+    FsrEasuTapF(&aC, &aW, vec2<f32>(0.0,-1.0)-pp, dir, len2, lob, clp, bC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(1.0,-1.0)-pp, dir, len2, lob, clp, cC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(-1.0,1.0)-pp, dir, len2, lob, clp, iC_s);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(0.0,1.0)-pp, dir, len2, lob, clp, jC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(0.0,0.0)-pp, dir, len2, lob, clp, fC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(-1.0,0.0)-pp, dir, len2, lob, clp, eC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(1.0,1.0)-pp, dir, len2, lob, clp, kC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(2.0,1.0)-pp, dir, len2, lob, clp, lC_s);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(2.0,0.0)-pp, dir, len2, lob, clp, hC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(1.0,0.0)-pp, dir, len2, lob, clp, gC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(1.0,2.0)-pp, dir, len2, lob, clp, oC);
+    FsrEasuTapF(&aC, &aW, vec2<f32>(0.0,2.0)-pp, dir, len2, lob, clp, nC);
+    return min(max4, max(min4, aC / aW));
+}
+
+@fragment fn fsMain(input: VertexOutput) -> @location(0) vec4<f32> {
+    let rendersize = vec2<f32>(textureDimensions(ourTexture));
+    let cons = FsrEasuCon(rendersize, rendersize, params.resolution);
+    let c = FsrEasuF(input.position.xy, cons[0], cons[1], cons[2], cons[3]);
+    return vec4<f32>(c, 1.0);
+}
+`;
+
+const RCAS_WGSL = `
+struct RcasParams { resolution: vec2<f32>, sharpness: f32, brightness: f32, contrast: f32, saturation: f32 };
+struct VertexOutput { @builtin(position) position: vec4<f32> };
+
+@group(0) @binding(0) var ourSampler: sampler;
+@group(0) @binding(1) var ourTexture: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> params: RcasParams;
+
+const LUMINOSITY_FACTOR = vec3<f32>(0.299, 0.587, 0.114);
+const FSR_RCAS_LIMIT: f32 = 0.25 - 1.0 / 16.0;
+
+@vertex fn vsMain(@location(0) pos: vec2<f32>) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4<f32>(pos, 0.0, 1.0);
+    return out;
+}
+
+fn FsrRcasLoadF(p: vec2<f32>) -> vec4<f32> {
+    return textureSample(ourTexture, ourSampler, p / params.resolution);
+}
+
+fn FsrRcasF(ip: vec2<f32>, con: f32) -> vec3<f32> {
+    let sp = ip;
+    let b = FsrRcasLoadF(sp + vec2<f32>(0.0,-1.0)).rgb;
+    let d = FsrRcasLoadF(sp + vec2<f32>(-1.0,0.0)).rgb;
+    let e = FsrRcasLoadF(sp).rgb;
+    let f = FsrRcasLoadF(sp + vec2<f32>(1.0,0.0)).rgb;
+    let h = FsrRcasLoadF(sp + vec2<f32>(0.0,1.0)).rgb;
+    let bL = b.g+0.5*(b.b+b.r); let dL = d.g+0.5*(d.b+d.r);
+    let eL = e.g+0.5*(e.b+e.r); let fL = f.g+0.5*(f.b+f.r);
+    let hL = h.g+0.5*(h.b+h.r);
+    let nz_raw = 0.25*(bL+dL+fL+hL)-eL;
+    var nz = clamp(abs(nz_raw)/(max(max(bL,dL),max(eL,max(fL,hL)))-min(min(bL,dL),min(eL,min(fL,hL)))),0.0,1.0);
+    nz = 1.0-0.5*nz;
+    let mn4 = min(b, min(f, h)); let mx4 = max(b, max(f, h));
+    let peakC = vec2<f32>(1.0,-4.0);
+    let hitMin = mn4/(4.0*mx4);
+    let hitMax = (peakC.x-mx4)/(4.0*mn4+peakC.y);
+    let lobeRGB = max(-hitMin, hitMax);
+    var lobe = max(-FSR_RCAS_LIMIT, min(max(lobeRGB.r,max(lobeRGB.g,lobeRGB.b)),0.0))*con;
+    lobe *= nz;
+    return (lobe*(b+d+h+f)+e)/(4.0*lobe+1.0);
+}
+
+@fragment fn fsMain(input: VertexOutput) -> @location(0) vec4<f32> {
+    let con = exp2(-params.sharpness);
+    var color = FsrRcasF(input.position.xy, con);
+    color = mix(vec3<f32>(dot(color, LUMINOSITY_FACTOR)), color, params.saturation);
+    color = params.contrast * (color - 0.5) + 0.5;
+    color = params.brightness * color;
+    return vec4<f32>(color, 1.0);
+}
+`;
+
+// ===== Logging =====
+const logEl = document.getElementById('logView');
+function log(msg, type = 'info') {
+    const colors = { info: '#aaa', ok: '#4caf50', warn: '#ff9800', error: '#e94560' };
+    const ts = new Date().toLocaleTimeString();
+    logEl.innerHTML += `<span style="color:${colors[type]}">[${ts}] ${msg}</span>\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+    if (type === 'error') console.error(msg);
+}
+
+// ===== State =====
+let currentRenderer = null;
+let animId = null;
+let frameCount = 0;
+let lastFpsTime = 0;
+
+const video = document.getElementById('video');
+const fsrPane = document.getElementById('fsrPane');
+const originalPane = document.getElementById('originalPane');
+
+// ===== WebGL2 Renderer =====
+class WebGL2FSR {
+    constructor(video, container) {
+        this.video = video;
+        this.canvas = document.createElement('canvas');
+        container.insertBefore(this.canvas, container.firstChild);
+        this.canvas.style.maxWidth = '100%';
+        this.canvas.style.maxHeight = '100%';
+        this.canvas.style.objectFit = 'contain';
+    }
+
+    init(outputW, outputH, params) {
+        this.canvas.width = outputW;
+        this.canvas.height = outputH;
+        const gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
+        if (!gl) throw new Error('WebGL2 not supported');
+        this.gl = gl;
+        this.params = params;
+
+        log('WebGL2 context created', 'ok');
+        log(`Output resolution: ${outputW}x${outputH}`);
+        log(`Video resolution: ${this.video.videoWidth}x${this.video.videoHeight}`);
+
+        // Compile shaders
+        this.easuProgram = this._createProgram(VERT_GLSL, EASU_FRAG_GLSL, 'EASU');
+        this.rcasProgram = this._createProgram(VERT_GLSL, RCAS_FRAG_GLSL, 'RCAS');
+        log('Shaders compiled successfully', 'ok');
+
+        // Vertex buffer
+        const buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+
+        for (const prog of [this.easuProgram, this.rcasProgram]) {
+            gl.useProgram(prog);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        }
+
+        // Video texture
+        this.videoTex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.videoTex);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+        // FBO texture
+        this.fboTex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.fboTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, outputW, outputH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+        // FBO
+        this.fbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fboTex, 0);
+        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (status !== gl.FRAMEBUFFER_COMPLETE) {
+            throw new Error('Framebuffer not complete: ' + status);
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        log('Framebuffer created', 'ok');
+
+        // Set uniforms
+        gl.useProgram(this.easuProgram);
+        gl.uniform1i(gl.getUniformLocation(this.easuProgram, 'iChannel0'), 0);
+        gl.uniform2f(gl.getUniformLocation(this.easuProgram, 'iResolution'), outputW, outputH);
+
+        gl.useProgram(this.rcasProgram);
+        gl.uniform1i(gl.getUniformLocation(this.rcasProgram, 'iChannel0'), 0);
+        this.updateParams(params);
+
+        log('WebGL2 FSR initialized', 'ok');
+    }
+
+    updateParams(p) {
+        this.params = p;
+        const gl = this.gl;
+        gl.useProgram(this.rcasProgram);
+        gl.uniform2f(gl.getUniformLocation(this.rcasProgram, 'iResolution'), this.canvas.width, this.canvas.height);
+        gl.uniform1f(gl.getUniformLocation(this.rcasProgram, 'sharpness'), p.sharpness);
+        gl.uniform1f(gl.getUniformLocation(this.rcasProgram, 'brightness'), p.brightness);
+        gl.uniform1f(gl.getUniformLocation(this.rcasProgram, 'contrast'), p.contrast);
+        gl.uniform1f(gl.getUniformLocation(this.rcasProgram, 'saturation'), p.saturation);
+    }
+
+    renderFrame(easuOnly) {
+        const gl = this.gl;
+        const w = this.canvas.width, h = this.canvas.height;
+
+        // Upload video
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.videoTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, this.video);
+
+        // Pass 1: EASU → FBO
+        gl.bindFramebuffer(gl.FRAMEBUFFER, easuOnly ? null : this.fbo);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(this.easuProgram);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.videoTex);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        if (easuOnly) return;
+
+        // Pass 2: RCAS → screen
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(this.rcasProgram);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.fboTex);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    destroy() {
+        const gl = this.gl;
+        if (gl) {
+            gl.deleteFramebuffer(this.fbo);
+            gl.deleteTexture(this.videoTex);
+            gl.deleteTexture(this.fboTex);
+            gl.deleteProgram(this.easuProgram);
+            gl.deleteProgram(this.rcasProgram);
+            gl.getExtension('WEBGL_lose_context')?.loseContext();
+        }
+        this.canvas.remove();
+        log('WebGL2 renderer destroyed');
+    }
+
+    _createProgram(vSrc, fSrc, label) {
+        const gl = this.gl;
+        const vs = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vs, vSrc); gl.compileShader(vs);
+        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+            const err = gl.getShaderInfoLog(vs);
+            log(`${label} vertex shader error: ${err}`, 'error');
+            throw new Error(err);
+        }
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fs, fSrc); gl.compileShader(fs);
+        if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+            const err = gl.getShaderInfoLog(fs);
+            log(`${label} fragment shader error: ${err}`, 'error');
+            throw new Error(err);
+        }
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+            const err = gl.getProgramInfoLog(prog);
+            log(`${label} link error: ${err}`, 'error');
+            throw new Error(err);
+        }
+        return prog;
+    }
+}
+
+// ===== WebGPU Renderer =====
+class WebGPUFSR {
+    constructor(video, container) {
+        this.video = video;
+        this.canvas = document.createElement('canvas');
+        container.insertBefore(this.canvas, container.firstChild);
+        this.canvas.style.maxWidth = '100%';
+        this.canvas.style.maxHeight = '100%';
+        this.canvas.style.objectFit = 'contain';
+    }
+
+    async init(outputW, outputH, params) {
+        this.canvas.width = outputW;
+        this.canvas.height = outputH;
+        this.params = params;
+
+        if (!navigator.gpu) throw new Error('WebGPU not supported in this browser');
+
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) throw new Error('No GPU adapter found');
+        this.device = await adapter.requestDevice();
+        this.device.addEventListener('uncapturederror', e => {
+            log(`GPU error: ${e.error.message}`, 'error');
+        });
+        log('WebGPU device created', 'ok');
+        log(`maxTextureDimension2D: ${this.device.limits.maxTextureDimension2D}`);
+        log(`Output resolution: ${outputW}x${outputH}`);
+
+        this.context = this.canvas.getContext('webgpu');
+        this.format = navigator.gpu.getPreferredCanvasFormat();
+        this.context.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
+
+        // Vertex buffer
+        this.vertexBuffer = this.device.createBuffer({
+            size: 6 * 4, usage: GPUBufferUsage.VERTEX, mappedAtCreation: true,
+        });
+        new Float32Array(this.vertexBuffer.getMappedRange()).set([-1, 3, -1, -1, 3, -1]);
+        this.vertexBuffer.unmap();
+
+        const vbLayout = { arrayStride: 8, attributes: [{ format: 'float32x2', offset: 0, shaderLocation: 0 }] };
+
+        // EASU pipeline
+        const easuModule = this.device.createShaderModule({ code: EASU_WGSL });
+        this.easuPipeline = this.device.createRenderPipeline({
+            layout: 'auto',
+            vertex: { module: easuModule, entryPoint: 'vsMain', buffers: [vbLayout] },
+            fragment: { module: easuModule, entryPoint: 'fsMain', targets: [{ format: this.format }] },
+            primitive: { topology: 'triangle-list' },
+        });
+        log('EASU pipeline created', 'ok');
+
+        // RCAS pipeline
+        const rcasModule = this.device.createShaderModule({ code: RCAS_WGSL });
+        this.rcasPipeline = this.device.createRenderPipeline({
+            layout: 'auto',
+            vertex: { module: rcasModule, entryPoint: 'vsMain', buffers: [vbLayout] },
+            fragment: { module: rcasModule, entryPoint: 'fsMain', targets: [{ format: this.format }] },
+            primitive: { topology: 'triangle-list' },
+        });
+        log('RCAS pipeline created', 'ok');
+
+        // Intermediate texture
+        this.intermediateTex = this.device.createTexture({
+            size: [outputW, outputH], format: this.format,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        this.intermediateView = this.intermediateTex.createView();
+
+        // Sampler
+        this.sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+        // EASU params
+        this.easuParamsBuffer = this._createUniformBuffer(new Float32Array([outputW, outputH]));
+
+        // RCAS params
+        this.updateParams(params);
+
+        log('WebGPU FSR initialized', 'ok');
+    }
+
+    updateParams(p) {
+        this.params = p;
+        if (this.rcasParamsBuffer) this.rcasParamsBuffer.destroy();
+        this.rcasParamsBuffer = this._createUniformBuffer(new Float32Array([
+            this.canvas.width, this.canvas.height, p.sharpness, p.brightness, p.contrast, p.saturation,
+        ]));
+        this.rcasBindGroup = this.device.createBindGroup({
+            layout: this.rcasPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: this.sampler },
+                { binding: 1, resource: this.intermediateView },
+                { binding: 2, resource: { buffer: this.rcasParamsBuffer } },
+            ],
+        });
+    }
+
+    renderFrame(easuOnly) {
+        const extTex = this.device.importExternalTexture({ source: this.video });
+        const easuBG = this.device.createBindGroup({
+            layout: this.easuPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: this.sampler },
+                { binding: 1, resource: extTex },
+                { binding: 2, resource: { buffer: this.easuParamsBuffer } },
+            ],
+        });
+
+        const encoder = this.device.createCommandEncoder();
+
+        // Pass 1: EASU
+        const easuTarget = easuOnly ? this.context.getCurrentTexture().createView() : this.intermediateView;
+        const easuPass = encoder.beginRenderPass({
+            colorAttachments: [{ view: easuTarget, loadOp: 'clear', storeOp: 'store', clearValue: [0,0,0,1] }],
+        });
+        easuPass.setPipeline(this.easuPipeline);
+        easuPass.setBindGroup(0, easuBG);
+        easuPass.setVertexBuffer(0, this.vertexBuffer);
+        easuPass.draw(3);
+        easuPass.end();
+
+        if (!easuOnly) {
+            // Pass 2: RCAS
+            const rcasPass = encoder.beginRenderPass({
+                colorAttachments: [{ view: this.context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0,0,0,1] }],
+            });
+            rcasPass.setPipeline(this.rcasPipeline);
+            rcasPass.setBindGroup(0, this.rcasBindGroup);
+            rcasPass.setVertexBuffer(0, this.vertexBuffer);
+            rcasPass.draw(3);
+            rcasPass.end();
+        }
+
+        this.device.queue.submit([encoder.finish()]);
+    }
+
+    destroy() {
+        this.intermediateTex?.destroy();
+        this.easuParamsBuffer?.destroy();
+        this.rcasParamsBuffer?.destroy();
+        this.vertexBuffer?.destroy();
+        if (this.context) this.context.unconfigure();
+        this.canvas.remove();
+        log('WebGPU renderer destroyed');
+    }
+
+    _createUniformBuffer(data) {
+        const buf = this.device.createBuffer({
+            size: data.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        this.device.queue.writeBuffer(buf, 0, data);
+        return buf;
+    }
+}
+
+// ===== Test Pattern Generator =====
+function createTestPatternVideo(width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    // Draw test pattern
+    // Gradient background
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, '#1a1a2e');
+    grad.addColorStop(0.5, '#16213e');
+    grad.addColorStop(1, '#0f3460');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    // Grid lines (tests edge detection)
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < width; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+    }
+    for (let y = 0; y < height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+    }
+
+    // Color bars
+    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
+    const barW = width / colors.length;
+    colors.forEach((c, i) => {
+        ctx.fillStyle = c;
+        ctx.fillRect(i * barW, height * 0.7, barW, height * 0.1);
+    });
+
+    // Diagonal lines (tests anisotropic filtering)
+    ctx.strokeStyle = '#e94560';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 10; i++) {
+        ctx.beginPath();
+        ctx.moveTo(width * 0.1 + i * 20, height * 0.1);
+        ctx.lineTo(width * 0.3 + i * 20, height * 0.5);
+        ctx.stroke();
+    }
+
+    // Circles (tests curve rendering)
+    ctx.strokeStyle = '#4caf50';
+    ctx.lineWidth = 2;
+    for (let r = 20; r < 120; r += 15) {
+        ctx.beginPath();
+        ctx.arc(width * 0.7, height * 0.35, r, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    // Text
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.floor(height/15)}px sans-serif`;
+    ctx.fillText('FSR Test Pattern', width * 0.05, height * 0.15);
+    ctx.font = `${Math.floor(height/25)}px sans-serif`;
+    ctx.fillText(`${width}x${height}`, width * 0.05, height * 0.22);
+
+    // Fine detail checkerboard (tests upscaling quality)
+    for (let y = Math.floor(height * 0.82); y < Math.floor(height * 0.95); y += 2) {
+        for (let x = Math.floor(width * 0.05); x < Math.floor(width * 0.95); x += 2) {
+            if ((x + y) % 4 === 0) {
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+    }
+
+    // Create video from canvas using captureStream
+    const stream = canvas.captureStream(30);
+    const mediaVideo = document.createElement('video');
+    mediaVideo.srcObject = stream;
+    mediaVideo.muted = true;
+    mediaVideo.loop = true;
+
+    // Animate the test pattern
+    let frame = 0;
+    function animate() {
+        frame++;
+        // Moving bar to show it's live
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, height * 0.58, width, height * 0.1);
+        ctx.fillStyle = '#e94560';
+        const barX = (frame * 3) % width;
+        ctx.fillRect(barX, height * 0.6, 60, height * 0.06);
+        ctx.fillStyle = '#fff';
+        ctx.font = `${Math.floor(height/30)}px monospace`;
+        ctx.fillText(`Frame: ${frame}`, width * 0.05, height * 0.66);
+        requestAnimationFrame(animate);
+    }
+    animate();
+
+    return mediaVideo;
+}
+
+// ===== UI Logic =====
+const els = {
+    renderer: document.getElementById('renderer'),
+    ratio: document.getElementById('ratio'),
+    sharpness: document.getElementById('sharpness'),
+    brightness: document.getElementById('brightness'),
+    contrast: document.getElementById('contrast'),
+    saturation: document.getElementById('saturation'),
+    viewMode: document.getElementById('viewMode'),
+    btnStart: document.getElementById('btnStart'),
+    statusText: document.getElementById('statusText'),
+};
+
+function getParams() {
+    return {
+        sharpness: parseFloat(els.sharpness.value),
+        brightness: parseFloat(els.brightness.value),
+        contrast: parseFloat(els.contrast.value),
+        saturation: parseFloat(els.saturation.value),
+    };
+}
+
+// Slider value display
+['sharpness', 'brightness', 'contrast', 'saturation'].forEach(id => {
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(id + 'Val');
+    el.addEventListener('input', () => {
+        valEl.textContent = parseFloat(el.value).toFixed(2);
+        if (currentRenderer) currentRenderer.updateParams(getParams());
+    });
+});
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('renderView').style.display = tab.dataset.tab === 'render' ? 'flex' : 'none';
+        document.getElementById('logView').style.display = tab.dataset.tab === 'log' ? 'block' : 'none';
+    });
+});
+
+// View mode
+els.viewMode.addEventListener('change', () => {
+    const mode = els.viewMode.value;
+    originalPane.style.display = mode === 'split' ? 'flex' : 'none';
+    document.getElementById('fsrLabel').textContent = mode === 'easu' ? 'EASU Only' : 'FSR Output';
+});
+
+// Video file input
+document.getElementById('videoFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    video.src = URL.createObjectURL(file);
+    video.onloadedmetadata = () => {
+        video.play();
+        els.btnStart.disabled = false;
+        els.statusText.textContent = `Video loaded: ${video.videoWidth}x${video.videoHeight}`;
+        document.getElementById('origRes').textContent = `${video.videoWidth}x${video.videoHeight}`;
+        log(`Video loaded: ${file.name} (${video.videoWidth}x${video.videoHeight})`, 'ok');
+    };
+});
+
+// Test pattern
+document.getElementById('btnTestPattern').addEventListener('click', () => {
+    const patternVideo = createTestPatternVideo(1280, 720);
+    patternVideo.play().then(() => {
+        video.srcObject = patternVideo.captureStream ? patternVideo.srcObject : null;
+        // Use the pattern video directly
+        window._testVideo = patternVideo;
+        video.src = '';
+        video.style.display = 'none';
+
+        // Show pattern in original pane
+        originalPane.querySelector('video')?.remove();
+        const displayVideo = patternVideo.cloneNode();
+        displayVideo.srcObject = patternVideo.srcObject;
+        displayVideo.muted = true;
+        displayVideo.play();
+        displayVideo.style.maxWidth = '100%';
+        displayVideo.style.maxHeight = '100%';
+        displayVideo.style.objectFit = 'contain';
+        originalPane.insertBefore(displayVideo, originalPane.firstChild);
+
+        els.btnStart.disabled = false;
+        els.statusText.textContent = 'Test pattern ready: 1280x720';
+        document.getElementById('origRes').textContent = '1280x720';
+        log('Test pattern created: 1280x720 @ 30fps', 'ok');
+    });
+});
+
+// Start/Stop
+els.btnStart.addEventListener('click', async () => {
+    if (animId) {
+        cancelAnimationFrame(animId);
+        animId = null;
+        currentRenderer?.destroy();
+        currentRenderer = null;
+        els.btnStart.textContent = 'Start Rendering';
+        els.statusText.textContent = 'Stopped';
+        return;
+    }
+
+    const sourceVideo = window._testVideo || video;
+    if (!sourceVideo.videoWidth) {
+        log('No video loaded', 'error');
+        return;
+    }
+
+    const ratio = parseFloat(els.ratio.value);
+    const outputW = Math.round(sourceVideo.videoWidth * ratio);
+    const outputH = Math.round(sourceVideo.videoHeight * ratio);
+    const params = getParams();
+
+    // Cleanup old renderer
+    currentRenderer?.destroy();
+
+    // Show views
+    const mode = els.viewMode.value;
+    originalPane.style.display = mode === 'split' ? 'flex' : 'none';
+
+    try {
+        if (els.renderer.value === 'webgl2') {
+            currentRenderer = new WebGL2FSR(sourceVideo, fsrPane);
+            currentRenderer.init(outputW, outputH, params);
+        } else {
+            currentRenderer = new WebGPUFSR(sourceVideo, fsrPane);
+            await currentRenderer.init(outputW, outputH, params);
+        }
+
+        document.getElementById('fsrRes').textContent = `${outputW}x${outputH}`;
+        els.btnStart.textContent = 'Stop Rendering';
+        els.statusText.textContent = `Rendering with ${els.renderer.value.toUpperCase()}`;
+
+        // Render loop
+        frameCount = 0;
+        lastFpsTime = performance.now();
+
+        function renderLoop() {
+            animId = requestAnimationFrame(renderLoop);
+            try {
+                const easuOnly = els.viewMode.value === 'easu';
+                currentRenderer.renderFrame(easuOnly);
+                frameCount++;
+                const now = performance.now();
+                if (now - lastFpsTime >= 1000) {
+                    const fps = Math.round(frameCount * 1000 / (now - lastFpsTime));
+                    document.getElementById('fpsCounter').textContent = `${fps} FPS`;
+                    frameCount = 0;
+                    lastFpsTime = now;
+                }
+            } catch (err) {
+                log(`Render error: ${err.message}`, 'error');
+                cancelAnimationFrame(animId);
+                animId = null;
+                els.btnStart.textContent = 'Start Rendering';
+            }
+        }
+        renderLoop();
+
+    } catch (err) {
+        log(`Init error: ${err.message}`, 'error');
+        els.statusText.textContent = 'Error: ' + err.message;
+    }
+});
+
+// Check WebGPU support
+if (!navigator.gpu) {
+    const opt = els.renderer.querySelector('option[value="webgpu"]');
+    opt.textContent = 'WebGPU (not supported)';
+    opt.disabled = true;
+    log('WebGPU not available in this browser', 'warn');
+}
+
+log('FSR Test ready. Load a video or use the test pattern.', 'info');
+</script>
+</body>
+</html>
