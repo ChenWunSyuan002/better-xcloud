@@ -27,6 +27,7 @@ export function patchVideoApi() {
             saturation: getStreamPref(StreamPref.VIDEO_SATURATION),
             contrast: getStreamPref(StreamPref.VIDEO_CONTRAST),
             brightness: getStreamPref(StreamPref.VIDEO_BRIGHTNESS),
+            fsrRatio: getStreamPref(StreamPref.VIDEO_FSR_RATIO),
         } satisfies StreamPlayerOptions;
 
         const streamPlayerManager= StreamPlayerManager.getInstance();

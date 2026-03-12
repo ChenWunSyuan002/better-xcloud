@@ -1,4 +1,4 @@
-import { StreamVideoProcessing, type StreamPlayerType } from "@/enums/pref-values";
+import { FsrUpscaleRatio, StreamVideoProcessing, type StreamPlayerType } from "@/enums/pref-values";
 import type { StreamPlayerOptions } from "@/types/stream";
 import { BxLogger } from "@/utils/bx-logger";
 
@@ -10,6 +10,7 @@ export const enum StreamPlayerElement {
 export const enum StreamPlayerFilter {
     USM = 1,
     CAS = 2,
+    FSR = 3,
 }
 
 export abstract class BaseStreamPlayer {
@@ -24,6 +25,7 @@ export abstract class BaseStreamPlayer {
         brightness: 1.0,
         contrast: 1.0,
         saturation: 1.0,
+        fsrRatio: FsrUpscaleRatio.AUTO,
     };
 
     protected isStopped = false;

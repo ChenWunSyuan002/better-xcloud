@@ -129,6 +129,15 @@ export const enum StreamPlayerType {
 export const enum StreamVideoProcessing {
     USM = 'usm',
     CAS = 'cas',
+    FSR = 'fsr',
+}
+
+export const enum FsrUpscaleRatio {
+    AUTO = 'auto',
+    X1 = '1',
+    X1_5 = '1.5',
+    X2 = '2',
+    X3 = '3',
 }
 
 export const enum StreamVideoProcessingMode {

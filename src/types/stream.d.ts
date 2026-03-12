@@ -1,4 +1,4 @@
-import type { StreamVideoProcessing, StreamVideoProcessingMode } from "@/enums/pref-values";
+import type { FsrUpscaleRatio, StreamVideoProcessing, StreamVideoProcessingMode } from "@/enums/pref-values";
 
 type StreamPlayerOptions = {
     processing: StreamVideoProcessing,
@@ -7,4 +7,5 @@ type StreamPlayerOptions = {
     saturation: number,
     contrast: number,
     brightness: number,
+    fsrRatio: FsrUpscaleRatio,
 };

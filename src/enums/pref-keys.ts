@@ -1,5 +1,5 @@
 import type { BaseSettingsStorage } from "@/utils/settings-storages/base-settings-storage";
-import type { BlockFeature, CodecProfile, DeviceVibrationMode, GameBarPosition, LoadingScreenRocket, NativeMkbMode, StreamPlayerType, StreamResolution, StreamStat, StreamStatPosition, StreamVideoProcessing, StreamVideoProcessingMode, TouchControllerMode, TouchControllerStyleCustom, TouchControllerStyleStandard, UiLayout, UiSection, UiTheme, VideoPosition, VideoPowerPreference, VideoRatio } from "./pref-values"
+import type { BlockFeature, CodecProfile, DeviceVibrationMode, FsrUpscaleRatio, GameBarPosition, LoadingScreenRocket, NativeMkbMode, StreamPlayerType, StreamResolution, StreamStat, StreamStatPosition, StreamVideoProcessing, StreamVideoProcessingMode, TouchControllerMode, TouchControllerStyleCustom, TouchControllerStyleStandard, UiLayout, UiSection, UiTheme, VideoPosition, VideoPowerPreference, VideoRatio } from "./pref-values"
 
 export const enum StorageKey {
     GLOBAL = 'BetterXcloud',
@@ -162,6 +162,7 @@ export const enum StreamPref {
     VIDEO_PROCESSING = 'video.processing',
     VIDEO_PROCESSING_MODE = 'video.processing.mode',
     VIDEO_SHARPNESS = 'video.processing.sharpness',
+    VIDEO_FSR_RATIO = 'video.processing.fsrRatio',
     VIDEO_MAX_FPS = 'video.maxFps',
     VIDEO_RATIO = 'video.ratio',
     VIDEO_BRIGHTNESS = 'video.brightness',
@@ -214,6 +215,7 @@ export type StreamPrefTypeMap = {
     [StreamPref.VIDEO_RATIO]: VideoRatio;
     [StreamPref.VIDEO_SATURATION]: number;
     [StreamPref.VIDEO_SHARPNESS]: number;
+    [StreamPref.VIDEO_FSR_RATIO]: FsrUpscaleRatio;
 }
 
 export type AllPrefs = GlobalPref | StreamPref;
@@ -306,6 +308,7 @@ export const ALL_PREFS: {
         StreamPref.VIDEO_RATIO,
         StreamPref.VIDEO_SATURATION,
         StreamPref.VIDEO_SHARPNESS,
+        StreamPref.VIDEO_FSR_RATIO,
     ],
 } as const;
 

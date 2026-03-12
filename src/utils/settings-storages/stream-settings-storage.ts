@@ -1,5 +1,5 @@
 import { StreamPref, StorageKey, type PrefTypeMap } from "@/enums/pref-keys";
-import { DeviceVibrationMode, StreamPlayerType, StreamVideoProcessing, VideoPowerPreference, VideoRatio, VideoPosition, StreamStat, StreamStatPosition, StreamVideoProcessingMode } from "@/enums/pref-values";
+import { DeviceVibrationMode, FsrUpscaleRatio, StreamPlayerType, StreamVideoProcessing, VideoPowerPreference, VideoRatio, VideoPosition, StreamStat, StreamStatPosition, StreamVideoProcessingMode } from "@/enums/pref-values";
 import { STATES } from "../global";
 import { KeyboardShortcutDefaultId } from "../local-db/keyboard-shortcuts-table";
 import { MkbMappingDefaultPresetId } from "../local-db/mkb-mapping-presets-table";
@@ -173,10 +173,11 @@ export class StreamSettingsStorage extends BaseSettingsStorage<StreamPref> {
             options: {
                 [StreamVideoProcessing.USM]: t('unsharp-masking'),
                 [StreamVideoProcessing.CAS]: t('amd-fidelity-cas'),
+                [StreamVideoProcessing.FSR]: t('amd-fsr'),
             },
             suggest: {
                 lowest: StreamVideoProcessing.USM,
-                highest: StreamVideoProcessing.CAS,
+                highest: StreamVideoProcessing.FSR,
             },
         },
         [StreamPref.VIDEO_PROCESSING_MODE]: {
@@ -189,6 +190,17 @@ export class StreamSettingsStorage extends BaseSettingsStorage<StreamPref> {
             suggest: {
                 lowest: StreamVideoProcessingMode.PERFORMANCE,
                 highest: StreamVideoProcessingMode.QUALITY,
+            },
+        },
+        [StreamPref.VIDEO_FSR_RATIO]: {
+            label: t('fsr-upscale-ratio'),
+            default: FsrUpscaleRatio.AUTO,
+            options: {
+                [FsrUpscaleRatio.AUTO]: t('auto'),
+                [FsrUpscaleRatio.X1]: '1x',
+                [FsrUpscaleRatio.X1_5]: '1.5x',
+                [FsrUpscaleRatio.X2]: '2x',
+                [FsrUpscaleRatio.X3]: '3x',
             },
         },
         [StreamPref.VIDEO_POWER_PREFERENCE]: {

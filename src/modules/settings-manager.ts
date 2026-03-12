@@ -90,6 +90,10 @@ export class SettingsManager {
         [StreamPref.VIDEO_SHARPNESS]: {
             onChange: updateVideoPlayer,
         },
+        [StreamPref.VIDEO_FSR_RATIO]: {
+            onChange: updateVideoPlayer,
+            onChangeUi: onChangeVideoPlayerType,
+        },
         [StreamPref.VIDEO_MAX_FPS]: {
             onChange: () => {
                 const value = getStreamPref(StreamPref.VIDEO_MAX_FPS);

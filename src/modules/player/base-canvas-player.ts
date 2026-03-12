@@ -74,6 +74,7 @@ export abstract class BaseCanvasPlayer extends BaseStreamPlayer {
     }
 
     toFilterId(processing: StreamVideoProcessing) {
+        if (processing === StreamVideoProcessing.FSR) return StreamPlayerFilter.FSR;
         return processing === StreamVideoProcessing.CAS ? StreamPlayerFilter.CAS : StreamPlayerFilter.USM;
     }
 

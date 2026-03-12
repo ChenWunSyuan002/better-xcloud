@@ -454,6 +454,7 @@ export class SettingsDialog extends NavigationDialog {
             StreamPref.VIDEO_POWER_PREFERENCE,
             StreamPref.VIDEO_PROCESSING,
             StreamPref.VIDEO_PROCESSING_MODE,
+            StreamPref.VIDEO_FSR_RATIO,
             StreamPref.VIDEO_RATIO,
             StreamPref.VIDEO_POSITION,
             StreamPref.VIDEO_SHARPNESS,
