@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Better xCloud (Lite)
-// @namespace    https://github.com/redphx
+// @namespace    https://github.com/ChenWunSyuan002
 // @version      [[VERSION]]
 // @description  Improve Xbox Cloud Gaming (xCloud) experience
 // @author       redphx
