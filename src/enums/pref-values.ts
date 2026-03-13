@@ -134,10 +134,10 @@ export const enum StreamVideoProcessing {
 
 export const enum FsrUpscaleRatio {
     AUTO = 'auto',
-    X1 = '1',
-    X1_5 = '1.5',
-    X2 = '2',
-    X3 = '3',
+    X1 = 'x1',
+    X1_5 = 'x1.5',
+    X2 = 'x2',
+    X3 = 'x3',
 }
 
 export const enum StreamVideoProcessingMode {

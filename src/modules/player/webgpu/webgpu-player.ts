@@ -233,7 +233,7 @@ export class WebGPUPlayer extends BaseCanvasPlayer {
             };
         }
 
-        const multiplier = parseFloat(ratio);
+        const multiplier = parseFloat(ratio.substring(1));
         return {
             width: Math.min(Math.round(videoWidth * multiplier), maxSize),
             height: Math.min(Math.round(videoHeight * multiplier), maxSize),
@@ -321,7 +321,7 @@ export class WebGPUPlayer extends BaseCanvasPlayer {
         this.rcasParamsBuffer?.destroy();
         this.rcasParamsBuffer = this.prepareUniformBuffer([
             this.$canvas.width, this.$canvas.height,
-            this.options.sharpness / 5,
+            (10 - this.options.sharpness) / 5,
             this.options.brightness / 100,
             this.options.contrast / 100,
             this.options.saturation / 100,

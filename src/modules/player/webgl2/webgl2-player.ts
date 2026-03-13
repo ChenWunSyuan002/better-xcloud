@@ -54,7 +54,7 @@ export class WebGL2Player extends BaseCanvasPlayer {
         // Update RCAS uniforms
         gl.useProgram(this.rcasProgram);
         gl.uniform2f(gl.getUniformLocation(this.rcasProgram!, 'iResolution'), canvasWidth, canvasHeight);
-        gl.uniform1f(gl.getUniformLocation(this.rcasProgram!, 'sharpness'), this.options.sharpness / 5);
+        gl.uniform1f(gl.getUniformLocation(this.rcasProgram!, 'sharpness'), (10 - this.options.sharpness) / 5);
         gl.uniform1f(gl.getUniformLocation(this.rcasProgram!, 'brightness'), this.options.brightness / 100);
         gl.uniform1f(gl.getUniformLocation(this.rcasProgram!, 'contrast'), this.options.contrast / 100);
         gl.uniform1f(gl.getUniformLocation(this.rcasProgram!, 'saturation'), this.options.saturation / 100);
@@ -144,7 +144,7 @@ export class WebGL2Player extends BaseCanvasPlayer {
             };
         }
 
-        const multiplier = parseFloat(ratio);
+        const multiplier = parseFloat(ratio.substring(1));
         return {
             width: Math.min(Math.round(videoWidth * multiplier), maxSize),
             height: Math.min(Math.round(videoHeight * multiplier), maxSize),
