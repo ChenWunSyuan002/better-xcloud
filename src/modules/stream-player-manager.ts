@@ -3,7 +3,7 @@ import { ScreenshotManager } from "@/utils/screenshot-manager";
 import { STATES } from "@/utils/global";
 import { StreamPref } from "@/enums/pref-keys";
 import { BX_FLAGS } from "@/utils/bx-flags";
-import { StreamPlayerType, VideoPosition } from "@/enums/pref-values";
+import { StreamPlayerType, StreamVideoProcessing, VideoPosition } from "@/enums/pref-values";
 import { getStreamPref } from "@/utils/pref-utils";
 import type { BaseCanvasPlayer } from "./player/base-canvas-player";
 import { VideoPlayer } from "./player/video/video-player";
@@ -20,6 +20,8 @@ export class StreamPlayerManager {
     private videoPlayer!: VideoPlayer;
     private canvasPlayer: BaseCanvasPlayer | null | undefined;
     private playerType: StreamPlayerType = StreamPlayerType.VIDEO;
+    private currentProcessing?: StreamVideoProcessing;
+    private currentFsrRatio?: string;
 
     private constructor() {}
 
@@ -122,6 +124,8 @@ export class StreamPlayerManager {
 
             // Destroy old player
             this.cleanUpCanvasPlayer();
+            this.currentProcessing = undefined;
+            this.currentFsrRatio = undefined;
 
             if (type === StreamPlayerType.VIDEO) {
                 // Switch from Canvas -> Video
@@ -146,7 +150,30 @@ export class StreamPlayerManager {
     }
 
     updateOptions(options: StreamPlayerOptions, refreshPlayer: boolean = false) {
-        (this.canvasPlayer || this.videoPlayer).updateOptions(options, refreshPlayer);
+        // FSR uses a completely different shader pipeline (two-pass),
+        // so switching to/from FSR or changing FSR ratio requires recreating the canvas player.
+        const needsRecreate = this.canvasPlayer && (
+            (options.processing !== this.currentProcessing &&
+             (options.processing === StreamVideoProcessing.FSR || this.currentProcessing === StreamVideoProcessing.FSR)) ||
+            (options.processing === StreamVideoProcessing.FSR && options.fsrRatio !== this.currentFsrRatio)
+        );
+
+        this.currentProcessing = options.processing;
+        this.currentFsrRatio = options.fsrRatio;
+
+        if (needsRecreate) {
+            this.cleanUpCanvasPlayer();
+
+            if (BX_FLAGS.EnableWebGPURenderer && this.playerType === StreamPlayerType.WEBGPU) {
+                this.canvasPlayer = new WebGPUPlayer(this.$video);
+            } else {
+                this.canvasPlayer = new WebGL2Player(this.$video);
+            }
+            this.canvasPlayer.updateOptions(options);
+            this.canvasPlayer.init();
+        } else {
+            (this.canvasPlayer || this.videoPlayer).updateOptions(options, refreshPlayer);
+        }
     }
 
     getPlayerElement(elementType?: StreamPlayerElement) {

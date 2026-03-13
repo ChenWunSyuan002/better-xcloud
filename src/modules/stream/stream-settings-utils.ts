@@ -79,8 +79,8 @@ export function updateVideoPlayer() {
     } satisfies StreamPlayerOptions;
 
     streamPlayerManager.switchPlayerType(getStreamPref(StreamPref.VIDEO_PLAYER_TYPE));
-    limitVideoPlayerFps(getStreamPref(StreamPref.VIDEO_MAX_FPS));
     streamPlayerManager.updateOptions(options);
+    limitVideoPlayerFps(getStreamPref(StreamPref.VIDEO_MAX_FPS));
     streamPlayerManager.refreshPlayer();
 }
 
