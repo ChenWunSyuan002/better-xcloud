@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better xCloud
-// @namespace    https://github.com/redphx
-// @version      6.7.7
+// @namespace    https://github.com/ChenWunSyuan002
+// @version      7.0.0
 // @description  Improve Xbox Cloud Gaming (xCloud) experience
 // @author       redphx
 // @license      MIT
@@ -10,8 +10,8 @@
 // @exclude      https://www.xbox.com/*/xbox-game-pass/play-day-one
 // @run-at       document-start
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/redphx/better-xcloud/typescript/dist/better-xcloud.meta.js
-// @downloadURL  https://github.com/redphx/better-xcloud/releases/latest/download/better-xcloud.user.js
+// @updateURL    https://raw.githubusercontent.com/ChenWunSyuan002/better-xcloud/feature/fsr/dist/better-xcloud.meta.js
+// @downloadURL  https://github.com/ChenWunSyuan002/better-xcloud/releases/latest/download/better-xcloud.user.js
 // ==/UserScript==
 "use strict";
 class BxLogger {
@@ -125,7 +125,8 @@ var ALL_PREFS = {
   "video.processing.mode",
   "video.ratio",
   "video.saturation",
-  "video.processing.sharpness"
+  "video.processing.sharpness",
+  "video.processing.fsrRatio"
  ]
 };
 var SMART_TV_UNIQUE_ID = "FC4A1DA2-711C-4E9C-BC7F-047AF8A672EA", CHROMIUM_VERSION = "140.0.3485.54";
@@ -195,7 +196,7 @@ class UserAgent {
   });
  }
 }
-var SCRIPT_VERSION = "6.7.7", SCRIPT_VARIANT = "full", AppInterface = window.AppInterface;
+var SCRIPT_VERSION = "7.0.0", SCRIPT_VARIANT = "full", AppInterface = window.AppInterface;
 UserAgent.init();
 var userAgent = window.navigator.userAgent.toLowerCase(), isTv = userAgent.includes("smart-tv") || userAgent.includes("smarttv") || /\baft.*\b/.test(userAgent), isVr = window.navigator.userAgent.includes("VR") && window.navigator.userAgent.includes("OculusBrowser"), browserHasTouchSupport = "ontouchstart" in window || navigator.maxTouchPoints > 0, userAgentHasTouchSupport = !isTv && !isVr && browserHasTouchSupport, STATES = {
  supportedRegion: !0,
@@ -413,6 +414,7 @@ var SUPPORTED_LANGUAGES = {
  "always-off": "Always off",
  "always-on": "Always on",
  "amd-fidelity-cas": "AMD FidelityFX CAS",
+ "amd-fsr": "AMD FSR 1.0",
  "app-settings": "App settings",
  apply: "Apply",
  "aspect-ratio": "Aspect ratio",
@@ -509,6 +511,7 @@ var SUPPORTED_LANGUAGES = {
  export: "Export",
  fast: "Fast",
  "force-native-mkb-games": "Force native Mouse & Keyboard for these games",
+ "fsr-upscale-ratio": "Upscale ratio",
  "fortnite-allow-stw-mode": 'Allows playing "Save the World" mode on mobile',
  "fortnite-force-console-version": "Fortnite: force console version",
  "friends-followers": "Friends and followers",
@@ -2081,7 +2084,8 @@ class BaseStreamPlayer {
   sharpness: 0,
   brightness: 1,
   contrast: 1,
-  saturation: 1
+  saturation: 1,
+  fsrRatio: "auto"
  };
  isStopped = !1;
  constructor(playerType, elementType, $video, logTag) {
@@ -2132,6 +2136,7 @@ class BaseCanvasPlayer extends BaseStreamPlayer {
   this.$canvas.width = 1, this.$canvas.height = 1;
  }
  toFilterId(processing) {
+  if (processing === "fsr") return 3;
   return processing === "cas" ? 2 : 1;
  }
  shouldDraw() {
@@ -2159,6 +2164,15 @@ class WebGPUPlayer extends BaseCanvasPlayer {
  optionsUpdated = !1;
  paramsBuffer;
  vertexBuffer;
+ easuPipeline = null;
+ rcasPipeline = null;
+ intermediateTexture = null;
+ intermediateTextureView = null;
+ easuParamsBuffer = null;
+ rcasParamsBuffer = null;
+ easuBindGroup = null;
+ rcasBindGroup = null;
+ isFsr = !1;
  static async prepare() {
   if (!BX_FLAGS.EnableWebGPURenderer || !navigator.gpu) {
    BxEventBus.Script.emit("webgpu.ready", {});
@@ -2178,6 +2192,10 @@ class WebGPUPlayer extends BaseCanvasPlayer {
   super("webgpu", $video, "WebGPUPlayer");
  }
  setupShaders() {
+  if (this.isFsr = this.options.processing === "fsr", this.isFsr) {
+   this.setupFsrShaders();
+   return;
+  }
   if (this.context = this.$canvas.getContext("webgpu"), !this.context) {
    alert("Can't initiate context");
    return;
@@ -2256,6 +2274,10 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4<f32> {let texSize = vec2<f32
   });
  }
  updateFrame() {
+  if (this.isFsr) {
+   this.updateFsrFrame();
+   return;
+  }
   this.updateCanvas();
   let commandEncoder = WebGPUPlayer.device.createCommandEncoder(), passEncoder = commandEncoder.beginRenderPass({
    colorAttachments: [{
@@ -2268,11 +2290,136 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4<f32> {let texSize = vec2<f32
   passEncoder.setPipeline(this.pipeline), passEncoder.setBindGroup(0, this.bindGroup), passEncoder.setVertexBuffer(0, this.vertexBuffer), passEncoder.draw(3), passEncoder.end(), WebGPUPlayer.device.queue.submit([commandEncoder.finish()]);
  }
  refreshPlayer() {
-  this.optionsUpdated = !1, this.updateCanvas();
+  if (this.isFsr) this.optionsUpdated = !1, this.updateFsrCanvas();
+  else this.optionsUpdated = !1, this.updateCanvas();
  }
  destroy() {
-  if (super.destroy(), this.isStopped = !0, this.pipeline = null, this.bindGroup = null, this.sampler = null, this.paramsBuffer?.destroy(), this.paramsBuffer = null, this.vertexBuffer?.destroy(), this.vertexBuffer = null, this.context) this.context.unconfigure(), this.context = null;
+  if (super.destroy(), this.destroyFsrResources(), this.isStopped = !0, this.pipeline = null, this.bindGroup = null, this.sampler = null, this.paramsBuffer?.destroy(), this.paramsBuffer = null, this.vertexBuffer?.destroy(), this.vertexBuffer = null, this.context) this.context.unconfigure(), this.context = null;
   console.log("WebGPU context successfully freed.");
+ }
+ calculateCanvasSize() {
+  let videoWidth = this.$video.videoWidth, videoHeight = this.$video.videoHeight, ratio = this.options.fsrRatio, maxSize = WebGPUPlayer.device.limits.maxTextureDimension2D;
+  if (ratio === "auto") {
+   let screenWidth = window.innerWidth * window.devicePixelRatio, screenHeight = window.innerHeight * window.devicePixelRatio, videoRatio = videoWidth / videoHeight, w, h;
+   if (screenWidth / screenHeight > videoRatio) h = screenHeight, w = Math.round(h * videoRatio);
+   else w = screenWidth, h = Math.round(w / videoRatio);
+   return {
+    width: Math.min(Math.max(w, videoWidth), maxSize),
+    height: Math.min(Math.max(h, videoHeight), maxSize)
+   };
+  }
+  let multiplier = parseFloat(ratio.substring(1));
+  return {
+   width: Math.min(Math.round(videoWidth * multiplier), maxSize),
+   height: Math.min(Math.round(videoHeight * multiplier), maxSize)
+  };
+ }
+ setupFsrShaders() {
+  if (this.context = this.$canvas.getContext("webgpu"), !this.context) {
+   alert("Can't initiate context");
+   return;
+  }
+  let format = navigator.gpu.getPreferredCanvasFormat();
+  this.context.configure({
+   device: WebGPUPlayer.device,
+   format,
+   alphaMode: "opaque"
+  });
+  let canvasSize = this.calculateCanvasSize();
+  this.$canvas.width = canvasSize.width, this.$canvas.height = canvasSize.height, this.vertexBuffer = WebGPUPlayer.device.createBuffer({
+   label: "vertex buffer",
+   size: 24,
+   usage: GPUBufferUsage.VERTEX,
+   mappedAtCreation: !0
+  }), new Float32Array(this.vertexBuffer.getMappedRange()).set([-1, 3, -1, -1, 3, -1]), this.vertexBuffer.unmap();
+  let vertexBufferLayout = {
+   arrayStride: 8,
+   attributes: [{ format: "float32x2", offset: 0, shaderLocation: 0 }]
+  }, easuModule = WebGPUPlayer.device.createShaderModule({
+   code: `struct EasuParams {resolution: vec2<f32>,};struct VertexOutput {@builtin(position) position: vec4<f32>,};@group(0) @binding(0) var ourSampler: sampler;
+@group(0) @binding(1) var ourTexture: texture_external;
+@group(0) @binding(2) var<uniform> params: EasuParams;
+@vertex
+fn vsMain(@location(0) pos: vec2<f32>) -> VertexOutput {var out: VertexOutput;out.position = vec4<f32>(pos, 0.0, 1.0);return out;}fn FsrEasuCF(p: vec2<f32>) -> vec3<f32> {return textureSampleBaseClampToEdge(ourTexture, ourSampler, p).rgb;}fn FsrEasuCon(inputViewportInPixels: vec2<f32>,inputSizeInPixels: vec2<f32>,outputSizeInPixels: vec2<f32>,) -> array<vec4<f32>, 4> {let con0 = vec4<f32>(inputViewportInPixels.x / outputSizeInPixels.x,inputViewportInPixels.y / outputSizeInPixels.y,0.5 * inputViewportInPixels.x / outputSizeInPixels.x - 0.5,0.5 * inputViewportInPixels.y / outputSizeInPixels.y - 0.5,);let con1 = vec4<f32>(1.0, 1.0, 1.0, -1.0) / inputSizeInPixels.xyxy;let con2 = vec4<f32>(-1.0, 2.0, 1.0, 2.0) / inputSizeInPixels.xyxy;let con3 = vec4<f32>(0.0, 4.0, 0.0, 0.0) / inputSizeInPixels.xyxy;return array<vec4<f32>, 4>(con0, con1, con2, con3);}fn FsrEasuTapF(aC: ptr<function, vec3<f32>>,aW: ptr<function, f32>,off: vec2<f32>,dir: vec2<f32>,len: vec2<f32>,lob: f32,clp: f32,c: vec3<f32>,) {let v = vec2<f32>(dot(off, dir), dot(off, vec2<f32>(-dir.y, dir.x))) * len;let d2 = min(dot(v, v), clp);var wB = 0.4 * d2 - 1.0;var wA = lob * d2 - 1.0;wB = wB * wB;wA = wA * wA;wB = 1.5625 * wB - 0.5625;let w = wB * wA;*aC += c * w;*aW += w;}fn FsrEasuSetF(dir: ptr<function, vec2<f32>>,lenAccum: ptr<function, f32>,w: f32,lA: f32, lB: f32, lC: f32, lD: f32, lE: f32,) {let lenX = max(abs(lD - lC), abs(lC - lB));let dirX = lD - lB;(*dir).x += dirX * w;var lenXn = clamp(abs(dirX) / lenX, 0.0, 1.0);lenXn = lenXn * lenXn;*lenAccum += lenXn * w;let lenY = max(abs(lE - lC), abs(lC - lA));let dirY = lE - lA;(*dir).y += dirY * w;var lenYn = clamp(abs(dirY) / lenY, 0.0, 1.0);lenYn = lenYn * lenYn;*lenAccum += lenYn * w;}fn FsrEasuF(ip: vec2<f32>,con0: vec4<f32>,con1: vec4<f32>,con2: vec4<f32>,con3: vec4<f32>,) -> vec3<f32> {var pp = ip * con0.xy + con0.zw;let fp = floor(pp);pp -= fp;let p0 = fp * con1.xy + con1.zw;let p1 = p0 + con2.xy;let p2 = p0 + con2.zw;let p3 = p0 + con3.xy;let off = vec4<f32>(-0.5, 0.5, -0.5, 0.5) * con1.xxyy;let bC = FsrEasuCF(p0 + off.xw);let bL = bC.g + 0.5 * (bC.r + bC.b);let cC = FsrEasuCF(p0 + off.yw);let cL = cC.g + 0.5 * (cC.r + cC.b);let iC_s = FsrEasuCF(p1 + off.xw);let iL = iC_s.g + 0.5 * (iC_s.r + iC_s.b);let jC = FsrEasuCF(p1 + off.yw);let jL = jC.g + 0.5 * (jC.r + jC.b);let fC = FsrEasuCF(p1 + off.yz);let fL = fC.g + 0.5 * (fC.r + fC.b);let eC = FsrEasuCF(p1 + off.xz);let eL = eC.g + 0.5 * (eC.r + eC.b);let kC = FsrEasuCF(p2 + off.xw);let kL = kC.g + 0.5 * (kC.r + kC.b);let lC_s = FsrEasuCF(p2 + off.yw);let lL = lC_s.g + 0.5 * (lC_s.r + lC_s.b);let hC = FsrEasuCF(p2 + off.yz);let hL = hC.g + 0.5 * (hC.r + hC.b);let gC = FsrEasuCF(p2 + off.xz);let gL = gC.g + 0.5 * (gC.r + gC.b);let oC = FsrEasuCF(p3 + off.yz);let oL = oC.g + 0.5 * (oC.r + oC.b);let nC = FsrEasuCF(p3 + off.xz);let nL = nC.g + 0.5 * (nC.r + nC.b);var dir = vec2<f32>(0.0);var lenAccum = 0.0;FsrEasuSetF(&dir, &lenAccum, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);FsrEasuSetF(&dir, &lenAccum, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);FsrEasuSetF(&dir, &lenAccum, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);FsrEasuSetF(&dir, &lenAccum, pp.x * pp.y, gL, jL, kL, lL, oL);let dir2 = dir * dir;let dirR_raw = dir2.x + dir2.y;let zro = dirR_raw < (1.0 / 32768.0);var dirR = inverseSqrt(dirR_raw);dirR = select(dirR, 1.0, zro);dir.x = select(dir.x, 1.0, zro);dir *= vec2<f32>(dirR);lenAccum = lenAccum * 0.5;lenAccum = lenAccum * lenAccum;let stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));let len2 = vec2<f32>(1.0 + (stretch - 1.0) * lenAccum, 1.0 - 0.5 * lenAccum);let lob = 0.5 - 0.29 * lenAccum;let clp = 1.0 / lob;let min4 = min(min(fC, gC), min(jC, kC));let max4 = max(max(fC, gC), max(jC, kC));var aC = vec3<f32>(0.0);var aW = 0.0;FsrEasuTapF(&aC, &aW, vec2<f32>(0.0, -1.0) - pp, dir, len2, lob, clp, bC);FsrEasuTapF(&aC, &aW, vec2<f32>(1.0, -1.0) - pp, dir, len2, lob, clp, cC);FsrEasuTapF(&aC, &aW, vec2<f32>(-1.0, 1.0) - pp, dir, len2, lob, clp, iC_s);FsrEasuTapF(&aC, &aW, vec2<f32>(0.0, 1.0) - pp, dir, len2, lob, clp, jC);FsrEasuTapF(&aC, &aW, vec2<f32>(0.0, 0.0) - pp, dir, len2, lob, clp, fC);FsrEasuTapF(&aC, &aW, vec2<f32>(-1.0, 0.0) - pp, dir, len2, lob, clp, eC);FsrEasuTapF(&aC, &aW, vec2<f32>(1.0, 1.0) - pp, dir, len2, lob, clp, kC);FsrEasuTapF(&aC, &aW, vec2<f32>(2.0, 1.0) - pp, dir, len2, lob, clp, lC_s);FsrEasuTapF(&aC, &aW, vec2<f32>(2.0, 0.0) - pp, dir, len2, lob, clp, hC);FsrEasuTapF(&aC, &aW, vec2<f32>(1.0, 0.0) - pp, dir, len2, lob, clp, gC);FsrEasuTapF(&aC, &aW, vec2<f32>(1.0, 2.0) - pp, dir, len2, lob, clp, oC);FsrEasuTapF(&aC, &aW, vec2<f32>(0.0, 2.0) - pp, dir, len2, lob, clp, nC);return min(max4, max(min4, aC / aW));}@fragment
+fn fsMain(input: VertexOutput) -> @location(0) vec4<f32> {let rendersize = vec2<f32>(textureDimensions(ourTexture));let cons = FsrEasuCon(rendersize, rendersize, params.resolution);let c = FsrEasuF(input.position.xy, cons[0], cons[1], cons[2], cons[3]);return vec4<f32>(c, 1.0);}`
+  });
+  this.easuPipeline = WebGPUPlayer.device.createRenderPipeline({
+   layout: "auto",
+   vertex: { module: easuModule, entryPoint: "vsMain", buffers: [vertexBufferLayout] },
+   fragment: { module: easuModule, entryPoint: "fsMain", targets: [{ format }] },
+   primitive: { topology: "triangle-list" }
+  });
+  let rcasModule = WebGPUPlayer.device.createShaderModule({
+   code: `struct RcasParams {resolution: vec2<f32>,sharpness: f32,brightness: f32,contrast: f32,saturation: f32,};struct VertexOutput {@builtin(position) position: vec4<f32>,};@group(0) @binding(0) var ourSampler: sampler;
+@group(0) @binding(1) var ourTexture: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> params: RcasParams;
+const LUMINOSITY_FACTOR = vec3<f32>(0.299, 0.587, 0.114);const FSR_RCAS_LIMIT: f32 = 0.25 - 1.0 / 16.0;@vertex
+fn vsMain(@location(0) pos: vec2<f32>) -> VertexOutput {var out: VertexOutput;out.position = vec4<f32>(pos, 0.0, 1.0);return out;}fn FsrRcasLoadF(p: vec2<f32>) -> vec4<f32> {return textureSample(ourTexture, ourSampler, p / params.resolution);}fn FsrRcasF(ip: vec2<f32>, con: f32) -> vec3<f32> {let sp = ip;let b = FsrRcasLoadF(sp + vec2<f32>(0.0, -1.0)).rgb;let d = FsrRcasLoadF(sp + vec2<f32>(-1.0, 0.0)).rgb;let e = FsrRcasLoadF(sp).rgb;let f = FsrRcasLoadF(sp + vec2<f32>(1.0, 0.0)).rgb;let h = FsrRcasLoadF(sp + vec2<f32>(0.0, 1.0)).rgb;let bL = b.g + 0.5 * (b.b + b.r);let dL = d.g + 0.5 * (d.b + d.r);let eL = e.g + 0.5 * (e.b + e.r);let fL = f.g + 0.5 * (f.b + f.r);let hL = h.g + 0.5 * (h.b + h.r);let nz_raw = 0.25 * (bL + dL + fL + hL) - eL;var nz = clamp(abs(nz_raw) / (max(max(bL, dL), max(eL, max(fL, hL)))- min(min(bL, dL), min(eL, min(fL, hL)))),0.0, 1.0,);nz = 1.0 - 0.5 * nz;let mn4 = min(b, min(f, h));let mx4 = max(b, max(f, h));let peakC = vec2<f32>(1.0, -4.0);let hitMin = mn4 / (4.0 * mx4);let hitMax = (peakC.x - mx4) / (4.0 * mn4 + peakC.y);let lobeRGB = max(-hitMin, hitMax);var lobe = max(-FSR_RCAS_LIMIT,min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0),) * con;lobe *= nz;return (lobe * (b + d + h + f) + e) / (4.0 * lobe + 1.0);}@fragment
+fn fsMain(input: VertexOutput) -> @location(0) vec4<f32> {let con = exp2(-params.sharpness);var color = FsrRcasF(input.position.xy, con);color = mix(vec3<f32>(dot(color, LUMINOSITY_FACTOR)), color, params.saturation);color = params.contrast * (color - 0.5) + 0.5;color = params.brightness * color;return vec4<f32>(color, 1.0);}`
+  });
+  this.rcasPipeline = WebGPUPlayer.device.createRenderPipeline({
+   layout: "auto",
+   vertex: { module: rcasModule, entryPoint: "vsMain", buffers: [vertexBufferLayout] },
+   fragment: { module: rcasModule, entryPoint: "fsMain", targets: [{ format }] },
+   primitive: { topology: "triangle-list" }
+  }), this.intermediateTexture = WebGPUPlayer.device.createTexture({
+   size: [canvasSize.width, canvasSize.height],
+   format,
+   usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+  }), this.intermediateTextureView = this.intermediateTexture.createView(), this.sampler = WebGPUPlayer.device.createSampler({ magFilter: "linear", minFilter: "linear" }), this.easuParamsBuffer = this.prepareUniformBuffer([canvasSize.width, canvasSize.height], Float32Array), this.updateFsrOptions();
+ }
+ updateFsrOptions() {
+  this.rcasParamsBuffer?.destroy(), this.rcasParamsBuffer = this.prepareUniformBuffer([
+   this.$canvas.width,
+   this.$canvas.height,
+   (10 - this.options.sharpness) / 5,
+   this.options.brightness / 100,
+   this.options.contrast / 100,
+   this.options.saturation / 100
+  ], Float32Array), this.rcasBindGroup = WebGPUPlayer.device.createBindGroup({
+   layout: this.rcasPipeline.getBindGroupLayout(0),
+   entries: [
+    { binding: 0, resource: this.sampler },
+    { binding: 1, resource: this.intermediateTextureView },
+    { binding: 2, resource: { buffer: this.rcasParamsBuffer } }
+   ]
+  }), this.optionsUpdated = !0;
+ }
+ updateFsrCanvas() {
+  let externalTexture = WebGPUPlayer.device.importExternalTexture({ source: this.$video });
+  if (!this.optionsUpdated) this.updateFsrOptions();
+  this.easuBindGroup = WebGPUPlayer.device.createBindGroup({
+   layout: this.easuPipeline.getBindGroupLayout(0),
+   entries: [
+    { binding: 0, resource: this.sampler },
+    { binding: 1, resource: externalTexture },
+    { binding: 2, resource: { buffer: this.easuParamsBuffer } }
+   ]
+  });
+ }
+ updateFsrFrame() {
+  this.updateFsrCanvas();
+  let commandEncoder = WebGPUPlayer.device.createCommandEncoder(), easuPass = commandEncoder.beginRenderPass({
+   colorAttachments: [{
+    view: this.intermediateTextureView,
+    loadOp: "clear",
+    storeOp: "store",
+    clearValue: [0, 0, 0, 1]
+   }]
+  });
+  easuPass.setPipeline(this.easuPipeline), easuPass.setBindGroup(0, this.easuBindGroup), easuPass.setVertexBuffer(0, this.vertexBuffer), easuPass.draw(3), easuPass.end();
+  let rcasPass = commandEncoder.beginRenderPass({
+   colorAttachments: [{
+    view: this.context.getCurrentTexture().createView(),
+    loadOp: "clear",
+    storeOp: "store",
+    clearValue: [0, 0, 0, 1]
+   }]
+  });
+  rcasPass.setPipeline(this.rcasPipeline), rcasPass.setBindGroup(0, this.rcasBindGroup), rcasPass.setVertexBuffer(0, this.vertexBuffer), rcasPass.draw(3), rcasPass.end(), WebGPUPlayer.device.queue.submit([commandEncoder.finish()]);
+ }
+ destroyFsrResources() {
+  this.intermediateTexture?.destroy(), this.intermediateTexture = null, this.intermediateTextureView = null, this.easuParamsBuffer?.destroy(), this.easuParamsBuffer = null, this.rcasParamsBuffer?.destroy(), this.rcasParamsBuffer = null, this.easuPipeline = null, this.rcasPipeline = null, this.easuBindGroup = null, this.rcasBindGroup = null;
  }
 }
 class StreamSettingsStorage extends BaseSettingsStorage {
@@ -2406,11 +2553,12 @@ class StreamSettingsStorage extends BaseSettingsStorage {
    default: "usm",
    options: {
     usm: t("unsharp-masking"),
-    cas: t("amd-fidelity-cas")
+    cas: t("amd-fidelity-cas"),
+    fsr: t("amd-fsr")
    },
    suggest: {
     lowest: "usm",
-    highest: "cas"
+    highest: "fsr"
    }
   },
   "video.processing.mode": {
@@ -2423,6 +2571,17 @@ class StreamSettingsStorage extends BaseSettingsStorage {
    suggest: {
     lowest: "performance",
     highest: "quality"
+   }
+  },
+  "video.processing.fsrRatio": {
+   label: t("fsr-upscale-ratio"),
+   default: "auto",
+   options: {
+    auto: t("auto"),
+    x1: "1x",
+    "x1.5": "1.5x",
+    x2: "2x",
+    x3: "3x"
    }
   },
   "video.player.powerPreference": {
@@ -2722,7 +2881,7 @@ function setPref(prefKey, value, origin) {
 }
 function checkForUpdate() {
  if (SCRIPT_VERSION.includes("beta")) return;
- fetch("https://api.github.com/repos/redphx/better-xcloud/releases/latest").then((response) => response.json()).then((json) => {
+ fetch("https://api.github.com/repos/ChenWunSyuan002/better-xcloud/releases/latest").then((response) => response.json()).then((json) => {
   setGlobalPref("version.latest", json.tag_name.substring(1), "direct"), setGlobalPref("version.current", SCRIPT_VERSION, "direct");
  });
  let CHECK_INTERVAL_SECONDS = 7200, currentVersion = getGlobalPref("version.current"), lastCheck = getGlobalPref("version.lastCheck"), now = Math.round(+new Date / 1000);
@@ -4467,6 +4626,10 @@ class SettingsManager {
   "video.processing.sharpness": {
    onChange: updateVideoPlayer
   },
+  "video.processing.fsrRatio": {
+   onChange: updateVideoPlayer,
+   onChangeUi: onChangeVideoPlayerType
+  },
   "video.maxFps": {
    onChange: () => {
     let value = getStreamPref("video.maxFps");
@@ -4614,11 +4777,11 @@ class SettingsManager {
 function onChangeVideoPlayerType() {
  let playerType = getStreamPref("video.player.type"), processing = getStreamPref("video.processing"), settingsManager = SettingsManager.getInstance();
  if (!settingsManager.hasElement("video.processing")) return;
- let isDisabled = !1, $videoProcessing = settingsManager.getElement("video.processing"), $videoProcessingMode = settingsManager.getElement("video.processing.mode"), $videoSharpness = settingsManager.getElement("video.processing.sharpness"), $videoPowerPreference = settingsManager.getElement("video.player.powerPreference"), $videoMaxFps = settingsManager.getElement("video.maxFps"), $optCas = $videoProcessing.querySelector(`option[value=${"cas"}]`);
+ let isDisabled = !1, $videoProcessing = settingsManager.getElement("video.processing"), $videoProcessingMode = settingsManager.getElement("video.processing.mode"), $videoSharpness = settingsManager.getElement("video.processing.sharpness"), $videoPowerPreference = settingsManager.getElement("video.player.powerPreference"), $videoMaxFps = settingsManager.getElement("video.maxFps"), $videoFsrRatio = settingsManager.getElement("video.processing.fsrRatio"), $optCas = $videoProcessing.querySelector(`option[value=${"cas"}]`), $optFsr = $videoProcessing.querySelector(`option[value=${"fsr"}]`), isFsr = processing === "fsr";
  if (playerType === "default") {
-  if ($videoProcessing.value = "usm", setStreamPref("video.processing", "usm", "direct"), $optCas && ($optCas.disabled = !0), UserAgent.isSafari()) isDisabled = !0;
- } else $optCas && ($optCas.disabled = !1);
- $videoProcessing.disabled = isDisabled, $videoSharpness.dataset.disabled = isDisabled.toString(), $videoProcessingMode.closest(".bx-settings-row").classList.toggle("bx-gone", !(playerType === "webgl2" && processing === "cas")), $videoPowerPreference.closest(".bx-settings-row").classList.toggle("bx-gone", playerType !== "webgl2"), $videoMaxFps.closest(".bx-settings-row").classList.toggle("bx-gone", playerType === "default");
+  if ($videoProcessing.value = "usm", setStreamPref("video.processing", "usm", "direct"), $optCas && ($optCas.disabled = !0), $optFsr && ($optFsr.disabled = !0), UserAgent.isSafari()) isDisabled = !0;
+ } else $optCas && ($optCas.disabled = !1), $optFsr && ($optFsr.disabled = !1);
+ $videoProcessing.disabled = isDisabled, $videoSharpness.dataset.disabled = isDisabled.toString(), $videoProcessingMode.closest(".bx-settings-row").classList.toggle("bx-gone", isFsr || !(playerType === "webgl2" && processing === "cas")), $videoFsrRatio.closest(".bx-settings-row").classList.toggle("bx-gone", !isFsr), $videoPowerPreference.closest(".bx-settings-row").classList.toggle("bx-gone", playerType !== "webgl2"), $videoMaxFps.closest(".bx-settings-row").classList.toggle("bx-gone", playerType === "default");
 }
 function limitVideoPlayerFps(targetFps) {
  STATES.currentStream.streamPlayerManager?.getCanvasPlayer()?.setTargetFps(targetFps);
@@ -4632,9 +4795,10 @@ function updateVideoPlayer() {
   sharpness: getStreamPref("video.processing.sharpness"),
   saturation: getStreamPref("video.saturation"),
   contrast: getStreamPref("video.contrast"),
-  brightness: getStreamPref("video.brightness")
+  brightness: getStreamPref("video.brightness"),
+  fsrRatio: getStreamPref("video.processing.fsrRatio")
  };
- streamPlayerManager.switchPlayerType(getStreamPref("video.player.type")), limitVideoPlayerFps(getStreamPref("video.maxFps")), streamPlayerManager.updateOptions(options), streamPlayerManager.refreshPlayer();
+ streamPlayerManager.switchPlayerType(getStreamPref("video.player.type")), streamPlayerManager.updateOptions(options), limitVideoPlayerFps(getStreamPref("video.maxFps")), streamPlayerManager.refreshPlayer();
 }
 function resizeVideoPlayer() {
  STATES.currentStream.streamPlayerManager?.resizePlayer();
@@ -7232,7 +7396,7 @@ class SettingsDialog extends NavigationDialog {
       style: 1 | 64 | 128
      };
      if (AppInterface && AppInterface.updateLatestScript) opts.onClick = (e) => AppInterface.updateLatestScript();
-     else opts.url = "https://github.com/redphx/better-xcloud/releases/latest";
+     else opts.url = "https://github.com/ChenWunSyuan002/better-xcloud/releases/latest";
      topButtons.push(createButton(opts));
     }
     if (AppInterface) topButtons.push(createButton({
@@ -7494,6 +7658,7 @@ class SettingsDialog extends NavigationDialog {
    "video.player.powerPreference",
    "video.processing",
    "video.processing.mode",
+   "video.processing.fsrRatio",
    "video.ratio",
    "video.position",
    "video.processing.sharpness",
@@ -9503,6 +9668,12 @@ class WebGL2Player extends BaseCanvasPlayer {
  gl = null;
  resources = [];
  program = null;
+ easuProgram = null;
+ rcasProgram = null;
+ fbo = null;
+ fboTexture = null;
+ videoTexture = null;
+ isFsr = !1;
  constructor($video) {
   super("webgl2", $video, "WebGL2Player");
  }
@@ -9511,9 +9682,79 @@ class WebGL2Player extends BaseCanvasPlayer {
   let gl = this.gl, program = this.program, filterId = this.toFilterId(this.options.processing);
   gl.uniform2f(gl.getUniformLocation(program, "iResolution"), this.$canvas.width, this.$canvas.height), gl.uniform1i(gl.getUniformLocation(program, "filterId"), filterId), gl.uniform1i(gl.getUniformLocation(program, "qualityMode"), this.options.processingMode === "quality" ? 1 : 0), gl.uniform1f(gl.getUniformLocation(program, "sharpenFactor"), this.options.sharpness / (this.options.processingMode === "quality" ? 1 : 1.2)), gl.uniform1f(gl.getUniformLocation(program, "brightness"), this.options.brightness / 100), gl.uniform1f(gl.getUniformLocation(program, "contrast"), this.options.contrast / 100), gl.uniform1f(gl.getUniformLocation(program, "saturation"), this.options.saturation / 100);
  }
+ updateFsrCanvas() {
+  console.log("updateFsrCanvas", this.options);
+  let gl = this.gl, canvasWidth = this.$canvas.width, canvasHeight = this.$canvas.height;
+  gl.useProgram(this.easuProgram), gl.uniform2f(gl.getUniformLocation(this.easuProgram, "iResolution"), canvasWidth, canvasHeight), gl.useProgram(this.rcasProgram), gl.uniform2f(gl.getUniformLocation(this.rcasProgram, "iResolution"), canvasWidth, canvasHeight), gl.uniform1f(gl.getUniformLocation(this.rcasProgram, "sharpness"), (10 - this.options.sharpness) / 5), gl.uniform1f(gl.getUniformLocation(this.rcasProgram, "brightness"), this.options.brightness / 100), gl.uniform1f(gl.getUniformLocation(this.rcasProgram, "contrast"), this.options.contrast / 100), gl.uniform1f(gl.getUniformLocation(this.rcasProgram, "saturation"), this.options.saturation / 100);
+ }
  updateFrame() {
+  if (this.isFsr) {
+   this.updateFsrFrame();
+   return;
+  }
   let gl = this.gl;
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, this.$video), gl.drawArrays(gl.TRIANGLES, 0, 3);
+ }
+ updateFsrFrame() {
+  let gl = this.gl, canvasWidth = this.$canvas.width, canvasHeight = this.$canvas.height;
+  gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.videoTexture), gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, this.$video), gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo), gl.viewport(0, 0, canvasWidth, canvasHeight), gl.useProgram(this.easuProgram), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.videoTexture), gl.drawArrays(gl.TRIANGLES, 0, 3), gl.bindFramebuffer(gl.FRAMEBUFFER, null), gl.viewport(0, 0, canvasWidth, canvasHeight), gl.useProgram(this.rcasProgram), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.fboTexture), gl.drawArrays(gl.TRIANGLES, 0, 3);
+ }
+ createProgram(gl, vertexSource, fragmentSource) {
+  let vShader = gl.createShader(gl.VERTEX_SHADER);
+  if (gl.shaderSource(vShader, vertexSource), gl.compileShader(vShader), !gl.getShaderParameter(vShader, gl.COMPILE_STATUS)) console.error("Vertex shader compile error:", gl.getShaderInfoLog(vShader));
+  let fShader = gl.createShader(gl.FRAGMENT_SHADER);
+  if (gl.shaderSource(fShader, fragmentSource), gl.compileShader(fShader), !gl.getShaderParameter(fShader, gl.COMPILE_STATUS)) console.error("Fragment shader compile error:", gl.getShaderInfoLog(fShader));
+  let program = gl.createProgram();
+  if (gl.attachShader(program, vShader), gl.attachShader(program, fShader), gl.linkProgram(program), !gl.getProgramParameter(program, gl.LINK_STATUS)) console.error(`Link failed: ${gl.getProgramInfoLog(program)}`);
+  return this.resources.push(vShader, fShader, program), program;
+ }
+ calculateCanvasSize() {
+  let videoWidth = this.$video.videoWidth, videoHeight = this.$video.videoHeight, ratio = this.options.fsrRatio, gl = this.gl, maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  if (ratio === "auto") {
+   let screenWidth = window.innerWidth * window.devicePixelRatio, screenHeight = window.innerHeight * window.devicePixelRatio, videoRatio = videoWidth / videoHeight, w, h;
+   if (screenWidth / screenHeight > videoRatio) h = screenHeight, w = Math.round(h * videoRatio);
+   else w = screenWidth, h = Math.round(w / videoRatio);
+   return {
+    width: Math.min(Math.max(w, videoWidth), maxSize),
+    height: Math.min(Math.max(h, videoHeight), maxSize)
+   };
+  }
+  let multiplier = parseFloat(ratio.substring(1));
+  return {
+   width: Math.min(Math.round(videoWidth * multiplier), maxSize),
+   height: Math.min(Math.round(videoHeight * multiplier), maxSize)
+  };
+ }
+ setupFsrShaders() {
+  let gl = this.gl, vertexSource = `#version 300 es
+in vec4 position;void main() {gl_Position = position;}`, canvasSize = this.calculateCanvasSize();
+  this.$canvas.width = canvasSize.width, this.$canvas.height = canvasSize.height, this.easuProgram = this.createProgram(gl, `#version 300 es
+in vec4 position;void main() {gl_Position = position;}`, `#version 300 es
+precision mediump float;uniform vec2 iResolution;uniform sampler2D iChannel0;out vec4 fragColor;vec3 FsrEasuCF(vec2 p) {return texture(iChannel0, p).rgb;}/**** EASU ****/void FsrEasuCon(out vec4 con0,out vec4 con1,out vec4 con2,out vec4 con3,vec2 inputViewportInPixels,vec2 inputSizeInPixels,vec2 outputSizeInPixels){con0 = vec4(inputViewportInPixels.x / outputSizeInPixels.x,inputViewportInPixels.y / outputSizeInPixels.y,.5 * inputViewportInPixels.x / outputSizeInPixels.x - .5,.5 * inputViewportInPixels.y / outputSizeInPixels.y - .5);con1 = vec4(1, 1, 1, -1) / inputSizeInPixels.xyxy;con2 = vec4(-1, 2, 1, 2) / inputSizeInPixels.xyxy;con3 = vec4(0, 4, 0, 0) / inputSizeInPixels.xyxy;}void FsrEasuTapF(inout vec3 aC,inout float aW,vec2 off,vec2 dir,vec2 len,float lob,float clp,vec3 c){vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x)));v *= len;float d2 = min(dot(v, v), clp);float wB = .4 * d2 - 1.;float wA = lob * d2 - 1.;wB *= wB;wA *= wA;wB = 1.5625 * wB - .5625;float w = wB * wA;aC += c * w;aW += w;}void FsrEasuSetF(inout vec2 dir,inout float len,float w,float lA, float lB, float lC, float lD, float lE){float lenX = max(abs(lD - lC), abs(lC - lB));float dirX = lD - lB;dir.x += dirX * w;lenX = clamp(abs(dirX) / lenX, 0., 1.);lenX *= lenX;len += lenX * w;float lenY = max(abs(lE - lC), abs(lC - lA));float dirY = lE - lA;dir.y += dirY * w;lenY = clamp(abs(dirY) / lenY, 0., 1.);lenY *= lenY;len += lenY * w;}void FsrEasuF(out vec3 pix,vec2 ip,vec4 con0,vec4 con1,vec4 con2,vec4 con3){vec2 pp = ip * con0.xy + con0.zw;vec2 fp = floor(pp);pp -= fp;vec2 p0 = fp * con1.xy + con1.zw;vec2 p1 = p0 + con2.xy;vec2 p2 = p0 + con2.zw;vec2 p3 = p0 + con3.xy;vec4 off = vec4(-.5, .5, -.5, .5) * con1.xxyy;vec3 bC = FsrEasuCF(p0 + off.xw); float bL = bC.g + 0.5 * (bC.r + bC.b);vec3 cC = FsrEasuCF(p0 + off.yw); float cL = cC.g + 0.5 * (cC.r + cC.b);vec3 iC = FsrEasuCF(p1 + off.xw); float iL = iC.g + 0.5 * (iC.r + iC.b);vec3 jC = FsrEasuCF(p1 + off.yw); float jL = jC.g + 0.5 * (jC.r + jC.b);vec3 fC = FsrEasuCF(p1 + off.yz); float fL = fC.g + 0.5 * (fC.r + fC.b);vec3 eC = FsrEasuCF(p1 + off.xz); float eL = eC.g + 0.5 * (eC.r + eC.b);vec3 kC = FsrEasuCF(p2 + off.xw); float kL = kC.g + 0.5 * (kC.r + kC.b);vec3 lC = FsrEasuCF(p2 + off.yw); float lL = lC.g + 0.5 * (lC.r + lC.b);vec3 hC = FsrEasuCF(p2 + off.yz); float hL = hC.g + 0.5 * (hC.r + hC.b);vec3 gC = FsrEasuCF(p2 + off.xz); float gL = gC.g + 0.5 * (gC.r + gC.b);vec3 oC = FsrEasuCF(p3 + off.yz); float oL = oC.g + 0.5 * (oC.r + oC.b);vec3 nC = FsrEasuCF(p3 + off.xz); float nL = nC.g + 0.5 * (nC.r + nC.b);vec2 dir = vec2(0);float len = 0.;FsrEasuSetF(dir, len, (1. - pp.x) * (1. - pp.y), bL, eL, fL, gL, jL);FsrEasuSetF(dir, len,       pp.x  * (1. - pp.y), cL, fL, gL, hL, kL);FsrEasuSetF(dir, len, (1. - pp.x) *       pp.y , fL, iL, jL, kL, nL);FsrEasuSetF(dir, len,       pp.x  *       pp.y , gL, jL, kL, lL, oL);vec2 dir2 = dir * dir;float dirR = dir2.x + dir2.y;bool zro = dirR < (1.0 / 32768.0);dirR = inversesqrt(dirR);dirR = zro ? 1.0 : dirR;dir.x = zro ? 1.0 : dir.x;dir *= vec2(dirR);len = len * 0.5;len *= len;float stretch = dot(dir, dir) / (max(abs(dir.x), abs(dir.y)));vec2 len2 = vec2(1. + (stretch - 1.0) * len, 1. - .5 * len);float lob = .5 - .29 * len;float clp = 1. / lob;vec3 min4 = min(min(fC, gC), min(jC, kC));vec3 max4 = max(max(fC, gC), max(jC, kC));vec3 aC = vec3(0);float aW = 0.;FsrEasuTapF(aC, aW, vec2( 0, -1) - pp, dir, len2, lob, clp, bC);FsrEasuTapF(aC, aW, vec2( 1, -1) - pp, dir, len2, lob, clp, cC);FsrEasuTapF(aC, aW, vec2(-1,  1) - pp, dir, len2, lob, clp, iC);FsrEasuTapF(aC, aW, vec2( 0,  1) - pp, dir, len2, lob, clp, jC);FsrEasuTapF(aC, aW, vec2( 0,  0) - pp, dir, len2, lob, clp, fC);FsrEasuTapF(aC, aW, vec2(-1,  0) - pp, dir, len2, lob, clp, eC);FsrEasuTapF(aC, aW, vec2( 1,  1) - pp, dir, len2, lob, clp, kC);FsrEasuTapF(aC, aW, vec2( 2,  1) - pp, dir, len2, lob, clp, lC);FsrEasuTapF(aC, aW, vec2( 2,  0) - pp, dir, len2, lob, clp, hC);FsrEasuTapF(aC, aW, vec2( 1,  0) - pp, dir, len2, lob, clp, gC);FsrEasuTapF(aC, aW, vec2( 1,  2) - pp, dir, len2, lob, clp, oC);FsrEasuTapF(aC, aW, vec2( 0,  2) - pp, dir, len2, lob, clp, nC);pix = min(max4, max(min4, aC / aW));}void main(){vec4 fragCoord = gl_FragCoord;vec3 c;vec4 con0, con1, con2, con3;vec2 rendersize = vec2(textureSize(iChannel0, 0));FsrEasuCon(con0, con1, con2, con3, rendersize, rendersize, iResolution);FsrEasuF(c, fragCoord.xy, con0, con1, con2, con3);fragColor = vec4(c.xyz, 1);}`), this.rcasProgram = this.createProgram(gl, `#version 300 es
+in vec4 position;void main() {gl_Position = position;}`, `#version 300 es
+precision mediump float;uniform vec2 iResolution;uniform float sharpness;uniform sampler2D iChannel0;uniform float brightness;uniform float contrast;uniform float saturation;out vec4 fragColor;const vec3 LUMINOSITY_FACTOR = vec3(0.299, 0.587, 0.114);/***** RCAS *****/#define FSR_RCAS_LIMIT (0.25 - (1.0 / 16.0))
+void FsrRcasCon(out float con,float sharpness) {con = exp2(-sharpness);}vec4 FsrRcasLoadF(vec2 p) {return texture(iChannel0, p / iResolution.xy);}vec3 FsrRcasF(vec2 ip,float con) {vec2 sp = vec2(ip);vec3 b = FsrRcasLoadF(sp + vec2( 0, -1)).rgb;vec3 d = FsrRcasLoadF(sp + vec2(-1,  0)).rgb;vec3 e = FsrRcasLoadF(sp).rgb;vec3 f = FsrRcasLoadF(sp + vec2( 1,  0)).rgb;vec3 h = FsrRcasLoadF(sp + vec2( 0,  1)).rgb;float bL = b.g + .5 * (b.b + b.r);float dL = d.g + .5 * (d.b + d.r);float eL = e.g + .5 * (e.b + e.r);float fL = f.g + .5 * (f.b + f.r);float hL = h.g + .5 * (h.b + h.r);float nz = .25 * (bL + dL + fL + hL) - eL;nz = clamp(abs(nz)/ (max(max(bL, dL), max(eL, max(fL, hL)))- min(min(bL, dL), min(eL, min(fL, hL)))),0., 1.);nz = 1. - .5 * nz;vec3 mn4 = min(b, min(f, h));vec3 mx4 = max(b, max(f, h));vec2 peakC = vec2(1., -4.);vec3 hitMin = mn4 / (4. * mx4);vec3 hitMax = (peakC.x - mx4) / (4. * mn4 + peakC.y);vec3 lobeRGB = max(-hitMin, hitMax);float lobe = max(-FSR_RCAS_LIMIT,min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.)) * con;lobe *= nz;return (lobe * (b + d + h + f) + e) / (4. * lobe + 1.);}void main(){vec4 fragCoord = gl_FragCoord;float con;FsrRcasCon(con, sharpness);vec3 color = FsrRcasF(fragCoord.xy, con);color = mix(vec3(dot(color, LUMINOSITY_FACTOR)), color, saturation);color = contrast * (color - 0.5) + 0.5;color = brightness * color;fragColor = vec4(color, 1);}`);
+  let buffer = gl.createBuffer();
+  this.resources.push(buffer), gl.bindBuffer(gl.ARRAY_BUFFER, buffer), gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+   -1,
+   -1,
+   3,
+   -1,
+   -1,
+   3
+  ]), gl.STATIC_DRAW);
+  for (let prog of [this.easuProgram, this.rcasProgram])
+   gl.useProgram(prog), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, 0, 0);
+  this.videoTexture = gl.createTexture(), this.resources.push(this.videoTexture), gl.bindTexture(gl.TEXTURE_2D, this.videoTexture), gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !0), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR), this.fboTexture = gl.createTexture(), this.resources.push(this.fboTexture), gl.bindTexture(gl.TEXTURE_2D, this.fboTexture), gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvasSize.width, canvasSize.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR), this.fbo = gl.createFramebuffer(), gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo), gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fboTexture, 0);
+  let status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) console.error("Framebuffer not complete:", status);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null), gl.useProgram(this.easuProgram), gl.uniform1i(gl.getUniformLocation(this.easuProgram, "iChannel0"), 0), gl.useProgram(this.rcasProgram), gl.uniform1i(gl.getUniformLocation(this.rcasProgram, "iChannel0"), 0), this.updateFsrCanvas();
+ }
+ destroyFsrResources() {
+  let gl = this.gl;
+  if (!gl) return;
+  if (this.fbo) gl.deleteFramebuffer(this.fbo), this.fbo = null;
+  this.easuProgram = null, this.rcasProgram = null, this.fboTexture = null, this.videoTexture = null;
  }
  async setupShaders() {
   let gl = this.$canvas.getContext("webgl2", {
@@ -9525,7 +9766,11 @@ class WebGL2Player extends BaseCanvasPlayer {
    stencil: !1,
    powerPreference: getStreamPref("video.player.powerPreference")
   });
-  this.gl = gl, gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferWidth);
+  if (this.gl = gl, this.isFsr = this.options.processing === "fsr", this.isFsr) {
+   gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight), this.setupFsrShaders();
+   return;
+  }
+  gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferWidth);
   let vShader = gl.createShader(gl.VERTEX_SHADER);
   gl.shaderSource(vShader, `#version 300 es
 in vec4 position;void main() {gl_Position = position;}`), gl.compileShader(vShader);
@@ -9548,7 +9793,7 @@ precision mediump float;uniform sampler2D data;uniform vec2 iResolution;const in
   this.resources.push(texture), gl.bindTexture(gl.TEXTURE_2D, texture), gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !0), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR), gl.uniform1i(gl.getUniformLocation(program, "data"), 0), gl.activeTexture(gl.TEXTURE0);
  }
  destroy() {
-  super.destroy();
+  super.destroy(), this.destroyFsrResources();
   let gl = this.gl;
   if (!gl) return;
   gl.getExtension("WEBGL_lose_context")?.loseContext(), gl.useProgram(null);
@@ -9560,7 +9805,8 @@ precision mediump float;uniform sampler2D data;uniform vec2 iResolution;const in
   this.gl = null;
  }
  refreshPlayer() {
-  this.updateCanvas();
+  if (this.isFsr) this.updateFsrCanvas();
+  else this.updateCanvas();
  }
 }
 class VideoPlayer extends BaseStreamPlayer {
@@ -9623,6 +9869,8 @@ class StreamPlayerManager {
  videoPlayer;
  canvasPlayer;
  playerType = "default";
+ currentProcessing;
+ currentFsrRatio;
  constructor() {}
  setVideoElement($video) {
   this.$video = $video, this.videoPlayer = new VideoPlayer($video, "VideoPlayer"), this.videoPlayer.init();
@@ -9657,6 +9905,10 @@ class StreamPlayerManager {
    else {
     if (BX_FLAGS.EnableWebGPURenderer && type === "webgpu") this.canvasPlayer = new WebGPUPlayer(this.$video);
     else this.canvasPlayer = new WebGL2Player(this.$video);
+    if (this.currentProcessing !== void 0) this.canvasPlayer.updateOptions({
+      processing: this.currentProcessing,
+      fsrRatio: this.currentFsrRatio
+     });
     this.canvasPlayer.init(), this.videoPlayer.clearFilters(), this.$video.classList.add(videoClass);
    }
    this.playerType = type;
@@ -9664,7 +9916,12 @@ class StreamPlayerManager {
   refreshPlayer && this.refreshPlayer();
  }
  updateOptions(options, refreshPlayer = !1) {
-  (this.canvasPlayer || this.videoPlayer).updateOptions(options, refreshPlayer);
+  let needsRecreate = this.canvasPlayer && (options.processing !== this.currentProcessing && (options.processing === "fsr" || this.currentProcessing === "fsr") || options.processing === "fsr" && options.fsrRatio !== this.currentFsrRatio);
+  if (this.currentProcessing = options.processing, this.currentFsrRatio = options.fsrRatio, needsRecreate) {
+   if (this.cleanUpCanvasPlayer(), BX_FLAGS.EnableWebGPURenderer && this.playerType === "webgpu") this.canvasPlayer = new WebGPUPlayer(this.$video);
+   else this.canvasPlayer = new WebGL2Player(this.$video);
+   this.canvasPlayer.updateOptions(options), this.canvasPlayer.init();
+  } else (this.canvasPlayer || this.videoPlayer).updateOptions(options, refreshPlayer);
  }
  getPlayerElement(elementType) {
   if (typeof elementType > "u") elementType = this.playerType === "default" ? "video" : "canvas";
@@ -9698,7 +9955,8 @@ function patchVideoApi() {
    sharpness: getStreamPref("video.processing.sharpness"),
    saturation: getStreamPref("video.saturation"),
    contrast: getStreamPref("video.contrast"),
-   brightness: getStreamPref("video.brightness")
+   brightness: getStreamPref("video.brightness"),
+   fsrRatio: getStreamPref("video.processing.fsrRatio")
   }, streamPlayerManager = StreamPlayerManager.getInstance();
   streamPlayerManager.setVideoElement(this), streamPlayerManager.updateOptions(playerOptions, !1), streamPlayerManager.switchPlayerType(getStreamPref("video.player.type")), STATES.currentStream.streamPlayerManager = streamPlayerManager, BxEventBus.Stream.emit("state.playing", {
    $video: this
