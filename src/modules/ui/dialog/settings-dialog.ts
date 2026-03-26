@@ -118,7 +118,7 @@ export class SettingsDialog extends NavigationDialog {
                     if (AppInterface && AppInterface.updateLatestScript) {
                         opts.onClick = e => AppInterface.updateLatestScript();
                     } else {
-                        opts.url = 'https://github.com/redphx/better-xcloud/releases/latest';
+                        opts.url = 'https://github.com/ChenWunSyuan002/better-xcloud/releases/latest';
                     }
 
                     topButtons.push(createButton(opts));
