@@ -227,9 +227,20 @@ export class WebGPUPlayer extends BaseCanvasPlayer {
         if (ratio === FsrUpscaleRatio.AUTO) {
             const screenWidth = window.innerWidth * window.devicePixelRatio;
             const screenHeight = window.innerHeight * window.devicePixelRatio;
+            const videoRatio = videoWidth / videoHeight;
+
+            let w, h;
+            if (screenWidth / screenHeight > videoRatio) {
+                h = screenHeight;
+                w = Math.round(h * videoRatio);
+            } else {
+                w = screenWidth;
+                h = Math.round(w / videoRatio);
+            }
+
             return {
-                width: Math.min(Math.round(screenWidth), maxSize),
-                height: Math.min(Math.round(screenHeight), maxSize),
+                width: Math.min(Math.max(w, videoWidth), maxSize),
+                height: Math.min(Math.max(h, videoHeight), maxSize),
             };
         }
 

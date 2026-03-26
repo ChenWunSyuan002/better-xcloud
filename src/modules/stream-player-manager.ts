@@ -124,8 +124,6 @@ export class StreamPlayerManager {
 
             // Destroy old player
             this.cleanUpCanvasPlayer();
-            this.currentProcessing = undefined;
-            this.currentFsrRatio = undefined;
 
             if (type === StreamPlayerType.VIDEO) {
                 // Switch from Canvas -> Video
@@ -137,6 +135,16 @@ export class StreamPlayerManager {
                 } else {
                     this.canvasPlayer = new WebGL2Player(this.$video);
                 }
+
+                // Apply stored processing options before init so the correct
+                // shader pipeline (e.g. FSR two-pass) is set up on first creation.
+                if (this.currentProcessing !== undefined) {
+                    this.canvasPlayer.updateOptions({
+                        processing: this.currentProcessing,
+                        fsrRatio: this.currentFsrRatio,
+                    });
+                }
+
                 this.canvasPlayer.init();
 
                 this.videoPlayer.clearFilters();
